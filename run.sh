@@ -1,5 +1,5 @@
 #!/bin/sh
-# LimboOS build and run script
+# TaijiOS build and run script
 # Works on NixOS and OpenBSD
 
 set -e
@@ -20,7 +20,7 @@ else
     OS="linux"
 fi
 
-echo "=== LimboOS Build & Run Script ==="
+echo "=== TaijiOS Build & Run Script ==="
 echo "Detected OS: $OS"
 echo ""
 
@@ -78,11 +78,11 @@ echo ""
 EMU_ROOT="$(pwd)"
 export ROOT="$EMU_ROOT"
 
-# Function to set up LimboOS namespace directory structure
+# Function to set up TaijiOS namespace directory structure
 setup_namespace() {
     ROOT="$1"
 
-    echo "Setting up LimboOS namespace..."
+    echo "Setting up TaijiOS namespace..."
 
     # Create standard system directories
     mkdir -p "$ROOT/tmp"

@@ -1,10 +1,10 @@
-# LimboOS
+# TaijiOS
 
-## What is LimboOS?
+## What is TaijiOS?
 
-LimboOS is a modern fork of **Inferno®** Distributed Operating System, originally developed at Bell Labs and maintained by Vita Nuova® as Free Software (MIT License since 2021).
+TaijiOS is a modern fork of **Inferno®** Distributed Operating System, originally developed at Bell Labs and maintained by Vita Nuova® as Free Software (MIT License since 2021).
 
-LimboOS brings Inferno's powerful distributed computing capabilities to modern systems with updated build tools, C11 compliance, and enhanced platform support.
+TaijiOS brings Inferno's powerful distributed computing capabilities to modern systems with updated build tools, C11 compliance, and enhanced platform support.
 
 ### Core Features
 
@@ -14,7 +14,7 @@ LimboOS brings Inferno's powerful distributed computing capabilities to modern s
 - **Everything is a File** - Unified interface to all resources via Styx protocol
 - **Portable Applications** - Write once, run on any supported architecture
 
-### How LimboOS Differs from Inferno
+### How TaijiOS Differs from Inferno
 
 - **Modern Build System** - C11 standard compliance, modern gcc/clang support
 - **Multi-Platform Support** - Native amd64 support for Linux, OpenBSD, 9front, and Plan 9
@@ -28,7 +28,7 @@ LimboOS brings Inferno's powerful distributed computing capabilities to modern s
 ### On NixOS (Recommended):
 
 ```bash
-cd /path/to/LimboOS
+cd /path/to/TaijiOS
 
 # Enter the build environment
 nix-shell
@@ -45,7 +45,7 @@ emu
 ### On OpenBSD:
 
 ```bash
-cd /path/to/LimboOS
+cd /path/to/TaijiOS
 chmod +x run.sh
 ./run.sh
 ```
@@ -58,7 +58,7 @@ chmod +x run.sh
 # Fedora: sudo dnf install gcc make libX11-devel libXext-devel
 # Arch: sudo pacman -S base-devel libx11 libxext
 
-cd /path/to/LimboOS
+cd /path/to/TaijiOS
 chmod +x run.sh
 ./run.sh
 ```
@@ -67,7 +67,7 @@ chmod +x run.sh
 
 After entering `nix-shell`, you have these helper functions:
 
-- `build9ferno` - Build LimboOS from scratch
+- `build9ferno` - Build TaijiOS from scratch
 - `run9ferno` - Run the Inferno emulator
 - `emu` - Alias for run9ferno
 
@@ -84,7 +84,7 @@ The `run.sh` script works on NixOS, OpenBSD, and generic Linux:
 ## Directory Structure
 
 ```
-LimboOS/
+TaijiOS/
 ├── Linux/amd64/      # Platform-specific binaries
 │   ├── bin/          # Built binaries (emu, limbo, etc.)
 │   └── lib/          # Libraries
@@ -145,7 +145,7 @@ Hello: module {
 
 init(nil: list of string) {
     sys := load Sys Sys->PATH;
-    sys->print("Hello from LimboOS!\n");
+    sys->print("Hello from TaijiOS!\n");
 }
 EOF
 
@@ -155,7 +155,7 @@ EOF
 
 ## Platform Support
 
-LimboOS runs in two modes:
+TaijiOS runs in two modes:
 
 ### Hosted Mode (Recommended)
 - Runs as an application on top of another OS
@@ -171,21 +171,21 @@ LimboOS runs in two modes:
 
 ### emu crashes on startup
 
-This was a known issue with X11 threading initialization. Fixed in LimboOS - if you still see crashes:
+This was a known issue with X11 threading initialization. Fixed in TaijiOS - if you still see crashes:
 
 ```bash
 # Make sure you have the latest version
 git pull
 
 # Rebuild
-cd /path/to/LimboOS
+cd /path/to/TaijiOS
 nix-shell
 build9ferno
 ```
 
 ### Username warnings
 
-When you see `cd: /usr/username: '/usr/username' does not exist`, this is normal. LimboOS tries to set up a home directory but falls back gracefully.
+When you see `cd: /usr/username: '/usr/username' does not exist`, this is normal. TaijiOS tries to set up a home directory but falls back gracefully.
 
 ### Build errors on Linux
 
@@ -217,7 +217,7 @@ mk install
 
 ## Contributing
 
-LimboOS welcomes contributions! Please see the source repository for guidelines on submitting patches and bug reports.
+TaijiOS welcomes contributions! Please see the source repository for guidelines on submitting patches and bug reports.
 
 ## Original Source
 
@@ -225,7 +225,7 @@ Based on Inferno OS Fourth Edition by Vita Nuova Holdings:
 - https://inferno-os.org/
 - https://github.com/inferno-os/inferno-os
 
-LimboOS incorporates enhancements from the 9front community:
+TaijiOS incorporates enhancements from the 9front community:
 - https://9front.org/
 
 ## License
@@ -239,8 +239,8 @@ See individual source files for details.
 - Bell Labs for the original Inferno operating system
 - Vita Nuova Holdings for releasing Inferno as free software
 - The 9front community for continued development and improvements
-- All contributors to LimboOS
+- All contributors to TaijiOS
 
 ---
 
-**LimboOS** - Distributed computing for the modern era.
+**TaijiOS** - Distributed computing for the modern era.
