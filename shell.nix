@@ -26,28 +26,28 @@ pkgs.mkShell {
 
   # Set environment variables for the build
   shellHook = ''
-    echo "Welcome to LimboOS (Inferno OS amd64) build environment"
+    echo "Welcome to TaijiOS (Inferno OS amd64) build environment"
 
-    # Find the LimboOS root directory by looking for mkfile
+    # Find the TaijiOS root directory by looking for mkfile
     if [ -f mkfile ] && [ -d emu ] && [ -d lib ]; then
       ROOT="$(pwd)"
-    elif [ -f ./LimboOS/mkfile ] && [ -d ./LimboOS/emu ]; then
-      ROOT="$(pwd)/LimboOS"
+    elif [ -f ./TaijiOS/mkfile ] && [ -d ./TaijiOS/emu ]; then
+      ROOT="$(pwd)/TaijiOS"
     else
-      echo "Warning: Cannot find LimboOS root directory. Please run from the LimboOS directory."
+      echo "Warning: Cannot find TaijiOS root directory. Please run from the TaijiOS directory."
       ROOT="$(pwd)"
     fi
     export ROOT
-    echo "LimboOS root: $ROOT"
+    echo "TaijiOS root: $ROOT"
     echo "Current directory: $(pwd)"
     echo ""
     echo "Quick start:"
-    echo "  build9ferno    - Build LimboOS"
+    echo "  build9ferno    - Build TaijiOS"
     echo "  run9ferno      - Run emu (Inferno emulator)"
     echo "  emu            - Run emu directly"
     echo ""
 
-    # Set PATH for LimboOS tools
+    # Set PATH for TaijiOS tools
     # Include utils/mk for the mk build tool, and Linux/amd64/bin for built binaries
     export PATH="$ROOT/utils/mk:$ROOT/Linux/amd64/bin:$PATH"
 
@@ -57,7 +57,7 @@ pkgs.mkShell {
 
     # Helper function to build
     build9ferno() {
-      echo "Building LimboOS..."
+      echo "Building TaijiOS..."
       cd "$ROOT"
 
       # Set LDFLAGS to help find X11 libraries
@@ -75,7 +75,7 @@ pkgs.mkShell {
 
     # Helper function to run emu
     run9ferno() {
-      echo "Starting LimboOS (Inferno emulator)..."
+      echo "Starting TaijiOS (Inferno emulator)..."
       echo "Type 'exit' or Ctrl+D to quit"
       echo ""
       cd "$ROOT" || exit 1
