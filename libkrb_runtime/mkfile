@@ -1,0 +1,16 @@
+<../mkconfig
+
+LIB=libkrb_runtime.a
+
+OFILES=\
+	runtime.$O\
+	widget_tree.$O\
+	style_engine.$O\
+	theme_engine.$O\
+	property_resolver.$O\
+	layout_engine.$O\
+
+HFILES=\
+	$ROOT/include/krb_runtime.h\
+
+<$ROOT/mkfiles/mksyslib-$SHELLTYPE

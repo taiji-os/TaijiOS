@@ -1,0 +1,13 @@
+<../mkconfig
+
+LIB=libkrb.a
+
+OFILES=\
+	krb_loader.$O\
+	krb_parser.$O\
+	krb_widget.$O\
+
+HFILES=\
+	$ROOT/include/krb.h\
+
+<$ROOT/mkfiles/mksyslib-$SHELLTYPE

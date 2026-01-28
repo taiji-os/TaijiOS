@@ -23,6 +23,9 @@ EMUDIRS=\
 	libmemdraw\
 	libmemlayer\
 	libdynld\
+	libkrb\
+	libkrb_runtime\
+	libkrb_render\
 	utils/data2c\
 	utils/ndate\
 	emu\
