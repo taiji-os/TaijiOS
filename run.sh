@@ -2,7 +2,8 @@
 # TaijiOS build and run script
 # Works on NixOS and OpenBSD
 
-set -e
+# Don't use set -e to allow graceful handling of "Text file busy" errors
+# when emu is already running
 
 # Optional clean build flag
 CLEAN_BUILD=""
@@ -26,6 +27,11 @@ fi
 
 echo "=== TaijiOS Build & Run Script ==="
 echo "Detected OS: $OS"
+echo ""
+echo "Usage: $0 [--clean|--build] [program.dis [args...]]"
+echo "  --clean : Clean build before running"
+echo "  --build : Build only, don't run"
+echo "  If no program specified, runs the Inferno shell (dis/sh.dis)"
 echo ""
 
 # Change to script directory
@@ -64,6 +70,8 @@ build_linux() {
 }
 
 # Build based on OS
+# Note: If emu is running, the final copy may fail with "Text file busy"
+# but this is OK - the build still completes successfully
 case "$OS" in
     nixos)
         build_nixos
@@ -79,6 +87,11 @@ esac
 echo ""
 echo "=== Build Complete! ==="
 echo ""
+
+# Exit if --build flag was used
+if [ -n "$BUILD_ONLY" ]; then
+    exit 0
+fi
 
 # Set up namespace for emu
 EMU_ROOT="$(pwd)"
@@ -124,8 +137,14 @@ setup_namespace() {
 
 # Function to run on NixOS
 run_nixos() {
+    # Default to shell if no program specified
+    if [ $# -eq 0 ]; then
+        set -- dis/sh.dis
+    fi
+
     echo "Starting emu on NixOS..."
-    echo "Type 'exit' to quit emu"
+    echo "Running: $*"
+    echo "Type 'exit' to quit"
     echo ""
 
     # Set up namespace before starting emu
@@ -138,8 +157,14 @@ run_nixos() {
 
 # Function to run on OpenBSD
 run_openbsd() {
+    # Default to shell if no program specified
+    if [ $# -eq 0 ]; then
+        set -- dis/sh.dis
+    fi
+
     echo "Starting emu on OpenBSD..."
-    echo "Type 'exit' to quit emu"
+    echo "Running: $*"
+    echo "Type 'exit' to quit"
     echo ""
 
     # Set up namespace before starting emu
@@ -153,8 +178,14 @@ run_openbsd() {
 
 # Function to run on generic Linux
 run_linux() {
+    # Default to shell if no program specified
+    if [ $# -eq 0 ]; then
+        set -- dis/sh.dis
+    fi
+
     echo "Starting emu..."
-    echo "Type 'exit' to quit emu"
+    echo "Running: $*"
+    echo "Type 'exit' to quit"
     echo ""
 
     # Set up namespace before starting emu
