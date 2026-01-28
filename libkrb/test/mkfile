@@ -1,0 +1,14 @@
+<../../../mkconfig
+
+TARG=test_parser
+
+OFILES=\
+	test_parser.$O\
+
+HFILES=../../include/krb.h
+
+LIBS=../../libkrb.a
+
+BIN=$ROOT/$OBJDIR/bin
+
+<$ROOT/mkfiles/mkone-$SHELLTYPE
