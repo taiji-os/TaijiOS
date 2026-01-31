@@ -38,6 +38,7 @@ pkgs.mkShell {
       ROOT="$(pwd)"
     fi
     export ROOT
+    export TAIJI_PATH="$ROOT"
     echo "TaijiOS root: $ROOT"
     echo "Current directory: $(pwd)"
     echo ""
