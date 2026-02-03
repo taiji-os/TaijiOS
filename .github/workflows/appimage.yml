@@ -1,0 +1,74 @@
+name: Build AppImage
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  release:
+    types: [ created ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-appimage:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gcc \
+            make \
+            binutils \
+            coreutils \
+            bash \
+            perl \
+            linux-headers-generic \
+            libx11-dev \
+            libxext-dev \
+            wget \
+            imagemagick \
+            fuse
+
+      - name: Build TaijiOS
+        run: |
+          chmod +x run.sh
+          ./run.sh --build
+
+      - name: Build AppImage
+        run: |
+          chmod +x build/build-appimage.sh
+          ./build/build-appimage.sh
+
+      - name: Get AppImage info
+        id: appimage-info
+        run: |
+          APPIMAGE=$(ls build/TaijiOS-*.AppImage | head -1)
+          APPNAME=$(basename "$APPIMAGE")
+          echo "appname=$APPNAME" >> $GITHUB_OUTPUT
+          echo "apppath=$APPIMAGE" >> $GITHUB_OUTPUT
+          APPSIZE=$(du -h "$APPIMAGE" | cut -f1)
+          echo "AppImage: $APPNAME ($APPSIZE)"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taijios-appimage
+          path: ${{ steps.appimage-info.outputs.apppath }}
+          retention-days: 90
+
+      - name: Upload to release (on release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.appimage-info.outputs.apppath }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

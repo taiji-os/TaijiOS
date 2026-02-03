@@ -1,0 +1,24 @@
+// Kryon Hello World Example
+// A simple button that prints a message when clicked
+
+@limbo
+handleClick: fn(top: ref Tk->Toplevel) {
+    sys->print("Hello from Kryon!\n");
+};
+@end
+
+App {
+    title = "Hello World"
+    width = 400
+    height = 300
+    background = "#191919"
+
+    Center {
+        Button {
+            text = "Click Me"
+            color = "white"
+            backgroundColor = "#404080"
+            onClick = handleClick
+        }
+    }
+}

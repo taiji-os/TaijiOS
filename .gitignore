@@ -9,6 +9,13 @@
 .DS_Store
 *.sublime-*
 
+# AppImage build artifacts
+/build/*.AppImage
+/build/*.AppDir/
+/build/squashfs-root/
+/build/appimagetool-*.AppImage
+/build/appimagetool-squashfs-root/
+
 # Nix build artifacts
 result*
 .darwin/

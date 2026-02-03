@@ -1,0 +1,31 @@
+<../../mkconfig
+
+KRYFILES=\
+	hello.kry\
+	button.kry\
+	simple.kry\
+
+DISFILES=\
+	hello.dis\
+	button.dis\
+	simple.dis\
+
+TARG=kryon-examples
+
+default:VQ: all
+
+all:VQ: $DISFILES
+
+%.dis: %.kry
+	echo "Compiling $stem.kry..."
+	kryonc $stem.kry
+	limbo -o $target $stem.b
+
+clean:VQ:
+	rm -f *.b *.dis
+
+install:VQ: $DISFILES
+	for i in $DISFILES
+	do
+		cp $i $ROOT/dis/kryon/
+	done
