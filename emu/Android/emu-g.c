@@ -5,6 +5,10 @@
 
 #include "emu-g.root.h"
 
+#ifndef KERNDATE
+#define KERNDATE 1729046400UL  /* 2024-10-15 default build date */
+#endif
+
 ulong ndevs = 17;
 
 extern Dev rootdevtab;
@@ -74,6 +78,6 @@ void modinit(void){
 }
 
 	void setpointer(int x, int y){USED(x); USED(y);}
-	ulong strtochan(char *s){USED(s); return ~0;}
+	/* strtochan is defined in libdraw/chan.c */
 char* conffile = "emu-g";
 ulong kerndate = KERNDATE;

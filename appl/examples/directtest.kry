@@ -1,0 +1,9 @@
+App {
+    title = "Direct Test"
+
+    Button {
+        text = "Click Me"
+        backgroundColor = "#FF0000"
+        color = "#FFFFFF"
+    }
+}

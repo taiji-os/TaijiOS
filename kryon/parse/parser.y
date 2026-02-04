@@ -28,13 +28,14 @@ extern int yylex(void);
 
 %token <string> TOKEN_STRING TOKEN_IDENTIFIER TOKEN_COLOR
 %token <number> TOKEN_NUMBER
-%token TOKEN_LIMBO TOKEN_TCL TOKEN_LUA
+%token <string> TOKEN_LIMBO TOKEN_TCL TOKEN_LUA
 %token TOKEN_APP TOKEN_WINDOW TOKEN_CONTAINER TOKEN_BUTTON
 %token TOKEN_TEXT TOKEN_INPUT TOKEN_COLUMN TOKEN_ROW TOKEN_CENTER
+%token TOKEN_END TOKEN_EOF
 
 %type <value> value
-%type <property> property property_list
-%type <widget> widget widget_list
+%type <property> property
+%type <widget> widget widget_body_content widget_body_item_list widget_body_item
 %type <codeblock> code_block code_blocks
 %type <appdecl> app_decl
 %type <program> program
@@ -88,8 +89,19 @@ code_block:
     ;
 
 app_decl:
-    TOKEN_APP '{' widget_body_content '}'
+    TOKEN_WINDOW '{' widget_body_content '}'
     {
+        $$ = ast_app_decl_create();
+        if ($3) {
+            $$->props = $3->props;
+            $$->body = $3->children;
+            $3->props = NULL;
+            $3->children = NULL;
+        }
+    }
+    | TOKEN_APP '{' widget_body_content '}'
+    {
+        /* For backward compatibility */
         $$ = ast_app_decl_create();
         if ($3) {
             $$->props = $3->props;
@@ -106,52 +118,94 @@ widget_body_content:
         $$ = ast_widget_create(WIDGET_CONTAINER);
         $$->is_wrapper = 1;
     }
-    | property_list
+    | widget_body_item_list
     {
         $$ = ast_widget_create(WIDGET_CONTAINER);
-        $$->props = $1;
-        $$->is_wrapper = 1;
-    }
-    | widget_list
-    {
-        $$ = ast_widget_create(WIDGET_CONTAINER);
-        $$->children = $1;
-        $$->is_wrapper = 1;
-    }
-    | property_list widget_list
-    {
-        $$ = ast_widget_create(WIDGET_CONTAINER);
-        $$->props = $1;
-        $$->children = $2;
+        $$->props = $1->props;
+        $$->children = $1->children;
+        $1->props = NULL;
+        $1->children = NULL;
+        free($1);
         $$->is_wrapper = 1;
     }
     ;
 
-widget_list:
-    widget
+widget_body_item_list:
+    widget_body_item
     {
         $$ = $1;
     }
-    | widget_list widget
+    | widget_body_item_list widget_body_item
     {
-        Widget *w = $1;
-        while (w->next) w = w->next;
-        w->next = $2;
+        if ($2->props) {
+            Property *p = $1->props;
+            if (p) {
+                while (p->next) p = p->next;
+                p->next = $2->props;
+            } else {
+                $1->props = $2->props;
+            }
+            $2->props = NULL;
+        }
+        if ($2->children) {
+            Widget *w = $1->children;
+            if (w) {
+                while (w->next) w = w->next;
+                w->next = $2->children;
+            } else {
+                $1->children = $2->children;
+            }
+            $2->children = NULL;
+        }
+        free($2);
         $$ = $1;
     }
     ;
 
-property_list:
+widget_body_item:
     property
     {
-        $$ = $1;
+        $$ = calloc(1, sizeof(*$$));
+        $$->props = $1;
+        $$->children = NULL;
     }
-    | property_list property
+    | widget
     {
-        Property *p = $1;
-        while (p->next) p = p->next;
-        p->next = $2;
-        $$ = $1;
+        $$ = calloc(1, sizeof(*$$));
+        $$->props = NULL;
+        $$->children = $1;
+    }
+    ;
+
+property:
+    TOKEN_IDENTIFIER '=' value
+    {
+        $$ = ast_property_create($1);
+        $$->value = $3;
+        free($1);
+    }
+    ;
+
+value:
+    TOKEN_STRING
+    {
+        $$ = ast_value_create(VALUE_STRING);
+        $$->v.string_val = $1;
+    }
+    | TOKEN_NUMBER
+    {
+        $$ = ast_value_create(VALUE_NUMBER);
+        $$->v.number_val = $1;
+    }
+    | TOKEN_COLOR
+    {
+        $$ = ast_value_create(VALUE_COLOR);
+        $$->v.color_val = $1;
+    }
+    | TOKEN_IDENTIFIER
+    {
+        $$ = ast_value_create(VALUE_IDENTIFIER);
+        $$->v.ident_val = $1;
     }
     ;
 
@@ -235,38 +289,6 @@ widget:
             $3->props = NULL;
             $3->children = NULL;
         }
-    }
-    ;
-
-property:
-    TOKEN_IDENTIFIER '=' value
-    {
-        $$ = ast_property_create($1);
-        $$->value = $3;
-        free($1);
-    }
-    ;
-
-value:
-    TOKEN_STRING
-    {
-        $$ = ast_value_create(VALUE_STRING);
-        $$->v.string_val = $1;
-    }
-    | TOKEN_NUMBER
-    {
-        $$ = ast_value_create(VALUE_NUMBER);
-        $$->v.number_val = $1;
-    }
-    | TOKEN_COLOR
-    {
-        $$ = ast_value_create(VALUE_COLOR);
-        $$->v.color_val = $1;
-    }
-    | TOKEN_IDENTIFIER
-    {
-        $$ = ast_value_create(VALUE_IDENTIFIER);
-        $$->v.ident_val = $1;
     }
     ;
 

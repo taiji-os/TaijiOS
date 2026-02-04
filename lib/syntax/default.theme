@@ -1,0 +1,13 @@
+# Default syntax highlighting theme
+# Format: token-name = color-or-hex
+
+keyword = #0000FF
+string = #00FF00
+char = #00FF00
+number = #FF0000
+comment = #888888
+type = #800080
+function = #006400
+operator = #000088
+preprocessor = #8B4513
+identifier = #000000

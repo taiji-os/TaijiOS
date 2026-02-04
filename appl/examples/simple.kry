@@ -1,59 +1,18 @@
-// Kryon Simple Demo
-// Basic text and layout example
+@limbo
+handleClick: fn() {
+    sys->print("Hello!\n");
+};
+@end
 
-App {
-    title = "Simple Demo"
-    width = 600
-    height = 400
-    background = "#16213e"
+Window {
+    title = "Hello"
+    width = 400
+    height = 300
 
-    Column {
-        gap = 15
-        padding = 40
-
-        Text {
-            text = "Welcome to Kryon"
-            fontSize = 32
-            color = "#e94560"
-        }
-
-        Text {
-            text = "A declarative UI language for TaijiOS"
-            fontSize = 16
-            color = "#0f3460"
-        }
-
-        Container {
-            backgroundColor = "#1a1a2e"
-            padding = 20
-
-            Column {
-                gap = 10
-
-                Text {
-                    text = "Features:"
-                    fontSize = 18
-                    color = "white"
-                }
-
-                Text {
-                    text = "- Declarative syntax"
-                    fontSize = 14
-                    color = "#a0a0a0"
-                }
-
-                Text {
-                    text = "- Multi-language handlers (Limbo, Tcl, Lua)"
-                    fontSize = 14
-                    color = "#a0a0a0"
-                }
-
-                Text {
-                    text = "- Compiled to efficient Limbo code"
-                    fontSize = 14
-                    color = "#a0a0a0"
-                }
-            }
+    Center {
+        Button {
+            text = "Click"
+            onClick = handleClick
         }
     }
 }

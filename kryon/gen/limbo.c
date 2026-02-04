@@ -5,21 +5,52 @@
 #include <ctype.h>
 
 char *escape_tk_string(const char *s) {
-    if (!s) return strdup("");
+    if (!s) return strdup("{}");
 
     size_t len = strlen(s);
-    char *result = malloc(len * 2 + 1);
+
+    /* Check if string needs braces (contains spaces, braces, or special chars) */
+    int needs_braces = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == ' ' || s[i] == '{' || s[i] == '}' || s[i] == '\\' || s[i] == '$' || s[i] == '[' || s[i] == ']') {
+            needs_braces = 1;
+            break;
+        }
+    }
+
+    /* For simple alphanumeric strings, return as-is without braces */
+    if (!needs_braces) {
+        return strdup(s);
+    }
+
+    /* Allocate for {value} plus potential escapes */
+    char *result = malloc(len + 10);
     if (!result) return NULL;
 
+    /* Use TCL brace notation for complex strings */
     size_t j = 0;
+    result[j++] = '{';
     for (size_t i = 0; i < len; i++) {
-        if (s[i] == '"' || s[i] == '\\' || s[i] == '$' || s[i] == '[' || s[i] == ']') {
+        /* Escape closing braces and backslashes in TCL */
+        if (s[i] == '}' || s[i] == '\\') {
             result[j++] = '\\';
         }
         result[j++] = s[i];
     }
+    result[j++] = '}';
     result[j] = '\0';
     return result;
+}
+
+/* Map Kryon property names to Tk property names */
+static const char *map_property_name(const char *prop_name) {
+    if (strcmp(prop_name, "color") == 0 || strcmp(prop_name, "textColor") == 0) {
+        return "fg";
+    }
+    if (strcmp(prop_name, "backgroundColor") == 0) {
+        return "bg";
+    }
+    return prop_name;  /* Default: use as-is */
 }
 
 static const char *widget_type_to_tk(WidgetType type) {
@@ -51,21 +82,54 @@ static const char *widget_type_to_name(WidgetType type) {
     }
 }
 
+/* Add a callback to the callback list */
+static void add_callback(CodeGen *cg, const char *name, const char *event) {
+    Callback *cb = calloc(1, sizeof(Callback));
+    if (!cb) return;
+    cb->name = strdup(name);
+    cb->event = strdup(event);
+    cb->next = cg->callbacks;
+    cg->callbacks = cb;
+    cg->has_callbacks = 1;
+}
+
+/* Check if a property is a callback (returns callback name or NULL) */
+static const char *is_callback_property(const char *prop_name) {
+    if (strncmp(prop_name, "on", 2) == 0) {
+        return prop_name;  /* It's a callback property */
+    }
+    return NULL;
+}
+
+/* Free callback list */
+static void free_callbacks(Callback *cb) {
+    while (cb) {
+        Callback *next = cb->next;
+        free(cb->name);
+        free(cb->event);
+        free(cb);
+        cb = next;
+    }
+}
+
 static void process_widget_list(CodeGen *cg, Widget *w, const char *parent, int is_root);
 
 /* Generate code for a single widget */
 static void codegen_widget(CodeGen *cg, Widget *w, const char *parent, int is_root) {
     if (!w) return;
 
-    /* Skip wrapper widgets */
-    if (w->is_wrapper) {
+    /* Skip wrapper widgets and layout helpers (Center, Column, Row are virtual containers) */
+    if (w->is_wrapper || w->type == WIDGET_CENTER || w->type == WIDGET_COLUMN || w->type == WIDGET_ROW) {
         process_widget_list(cg, w->children, parent, is_root);
         return;
     }
 
     char widget_path[256];
+    /* All widgets get a numbered path (even root-level widgets) */
     if (is_root) {
-        snprintf(widget_path, sizeof(widget_path), ".");
+        /* Root-level widgets get paths like .w0, .w1, etc. */
+        snprintf(widget_path, sizeof(widget_path), ".w%d", cg->widget_counter);
+        cg->widget_counter++;
     } else {
         snprintf(widget_path, sizeof(widget_path), "%s.w%d", parent, cg->widget_counter);
         cg->widget_counter++;
@@ -73,52 +137,76 @@ static void codegen_widget(CodeGen *cg, Widget *w, const char *parent, int is_ro
 
     /* Generate widget creation command */
     fprintf(cg->out, "    tk->cmd(toplevel, \"%s",
-            is_root ? "" : widget_path + 1); /* Skip leading dot for non-root */
+            widget_path); /* Keep the leading dot */
 
     const char *tk_type = widget_type_to_tk(w->type);
-    fprintf(cg->out, " %s\"", tk_type);
+    fprintf(cg->out, " %s", tk_type);
 
     /* Generate properties */
     Property *prop = w->props;
+    char *callback_name = NULL;  /* Track if this widget has a callback */
+
     while (prop) {
         if (prop->value) {
-            switch (prop->value->type) {
-                case VALUE_STRING: {
-                    char *escaped = escape_tk_string(prop->value->v.string_val);
-                    fprintf(cg->out, " -%s \"%s\"", prop->name, escaped);
-                    free(escaped);
-                    break;
+            /* Check if this is a callback property */
+            const char *cb_event = is_callback_property(prop->name);
+
+            if (cb_event && prop->value->type == VALUE_IDENTIFIER) {
+                /* This is a callback - save it and add to callback list */
+                callback_name = prop->value->v.ident_val;
+                add_callback(cg, callback_name, prop->name);
+            } else {
+                /* Regular property - generate Tk property */
+                const char *tk_prop = map_property_name(prop->name);
+                switch (prop->value->type) {
+                    case VALUE_STRING: {
+                        char *escaped = escape_tk_string(prop->value->v.string_val);
+                        fprintf(cg->out, " -%s %s", tk_prop, escaped);
+                        free(escaped);
+                        break;
+                    }
+                    case VALUE_NUMBER:
+                        fprintf(cg->out, " -%s %ld", tk_prop, prop->value->v.number_val);
+                        break;
+                    case VALUE_COLOR: {
+                        char *escaped = escape_tk_string(prop->value->v.color_val);
+                        fprintf(cg->out, " -%s %s", tk_prop, escaped);
+                        free(escaped);
+                        break;
+                    }
+                    case VALUE_IDENTIFIER:
+                        /* Identifiers in TCL should be plain (no braces needed) */
+                        fprintf(cg->out, " -%s %s", tk_prop, prop->value->v.ident_val);
+                        break;
+                    default:
+                        break;
                 }
-                case VALUE_NUMBER:
-                    fprintf(cg->out, " -%s %ld", prop->name, prop->value->v.number_val);
-                    break;
-                case VALUE_COLOR: {
-                    char *escaped = escape_tk_string(prop->value->v.color_val);
-                    fprintf(cg->out, " -%s #%s", prop->name, escaped);
-                    free(escaped);
-                    break;
-                }
-                case VALUE_IDENTIFIER:
-                    fprintf(cg->out, " -%s %s", prop->name, prop->value->v.ident_val);
-                    break;
-                default:
-                    break;
             }
         }
         prop = prop->next;
     }
 
+    /* Add -command property if this widget has a callback */
+    if (callback_name) {
+        fprintf(cg->out, " -command {send cmd %s}", callback_name);
+    }
+
     /* Special handling for layout containers */
     if (w->type == WIDGET_COLUMN || w->type == WIDGET_ROW) {
         fprintf(cg->out, "\" :=");  /* Print output for reference */
+    } else {
+        fprintf(cg->out, "\"");
     }
 
     fprintf(cg->out, ");\n");
 
-    /* Process children */
+    /* Process children FIRST (they need to be packed before this widget) */
     if (w->children) {
         process_widget_list(cg, w->children, widget_path, 0);
     }
+
+    /* Pack widget into parent AFTER children are packed (for proper Tk layout) */
+    fprintf(cg->out, "    tk->cmd(toplevel, \"pack %s\");\n", widget_path);
 }
 
 /* Process widget list, flattening wrappers */
@@ -153,8 +241,33 @@ static void codegen_prologue(CodeGen *cg, Program *prog) {
     fprintf(cg->out, "include \"tkclient.m\";\n\n");
 
     fprintf(cg->out, "sys: Sys;\n");
+    fprintf(cg->out, "draw: Draw;\n");
     fprintf(cg->out, "tk: Tk;\n");
     fprintf(cg->out, "tkclient: Tkclient;\n\n");
+
+    /* Generate module declaration */
+    fprintf(cg->out, "%s: module\n{\n", cg->module_name);
+    fprintf(cg->out, "    init: fn(ctxt: ref Draw->Context, nil: list of string);\n");
+
+    /* Add any function signatures from code blocks */
+    /* For Tk callbacks, we always use fn() with no parameters */
+    CodeBlock *cb = prog->code_blocks;
+    while (cb) {
+        if (cb->type == CODE_LIMBO && cb->code) {
+            /* Try to extract function name from code like "funcName: fn(...) {" */
+            char *code = cb->code;
+            char *colon = strchr(code, ':');
+            if (colon && strncmp(colon, ": fn(", 5) == 0) {
+                /* Find the start of the function name */
+                char *start = code;
+                while (start < colon && (*start == '\n' || isspace((unsigned char)*start))) start++;
+                fprintf(cg->out, "    %.*s: fn();\n", (int)(colon - start), start);
+            }
+        }
+        cb = cb->next;
+    }
+
+    fprintf(cg->out, "};\n\n");
 }
 
 /* Generate code blocks (Limbo functions) */
@@ -162,7 +275,61 @@ static void codegen_code_blocks(CodeGen *cg, Program *prog) {
     CodeBlock *cb = prog->code_blocks;
     while (cb) {
         if (cb->type == CODE_LIMBO && cb->code) {
-            fprintf(cg->out, "%s\n", cb->code);
+            char *code = cb->code;
+            char *current = code;
+
+            /* Process each function in the code block */
+            while (*current) {
+                /* Skip leading whitespace and newlines */
+                while (*current && (*current == '\n' || isspace((unsigned char)*current))) current++;
+                if (!*current) break;
+
+                /* Find function name (ends with ':') */
+                char *colon = strchr(current, ':');
+                if (!colon) break;
+
+                /* Find the opening brace */
+                char *lbrace = strchr(colon, '{');
+                if (!lbrace) break;
+
+                /* Find the matching closing brace by counting braces */
+                char *rbrace = lbrace;
+                int brace_count = 1;
+                while (*rbrace && brace_count > 0) {
+                    rbrace++;
+                    if (*rbrace == '{') brace_count++;
+                    else if (*rbrace == '}') brace_count--;
+                }
+
+                if (brace_count != 0) break;
+
+                /* Find the start of the function name */
+                char *name_start = current;
+                while (name_start < colon && (*name_start == '\n' || isspace((unsigned char)*name_start))) name_start++;
+
+                /* Extract function name */
+                int name_len = (int)(colon - name_start);
+
+                /* Output: name() { (Tk callbacks have no parameters) */
+                fprintf(cg->out, "\n%.*s()\n", name_len, name_start);
+
+                /* Find and output the function body */
+                char *body_start = lbrace + 1;
+                while (*body_start && (*body_start == '\n' || isspace((unsigned char)*body_start))) body_start++;
+
+                if (rbrace > body_start) {
+                    /* Trim trailing whitespace from body */
+                    char *body_end = rbrace - 1;
+                    while (body_end > body_start && (*body_end == '\n' || isspace((unsigned char)*body_end))) body_end--;
+                    fprintf(cg->out, "{\n%.*s\n}\n\n", (int)(body_end - body_start + 1), body_start);
+                }
+
+                /* Move to next function */
+                current = rbrace + 1;
+
+                /* Skip semicolon if present */
+                while (*current && (*current == ';' || *current == '\n' || isspace((unsigned char)*current))) current++;
+            }
         }
         cb = cb->next;
     }
@@ -171,11 +338,20 @@ static void codegen_code_blocks(CodeGen *cg, Program *prog) {
 /* Generate init function */
 static void codegen_init(CodeGen *cg, Program *prog) {
     fprintf(cg->out, "\n");
-    fprintf(cg->out, "init(nil: ref Draw->Context, nil: list of string)\n");
+    fprintf(cg->out, "init(ctxt: ref Draw->Context, nil: list of string)\n");
     fprintf(cg->out, "{\n");
+
+    /* Context check */
+    fprintf(cg->out, "    if (ctxt == nil) {\n");
+    fprintf(cg->out, "        sys->fprint(sys->fildes(2), \"app: no window context\\n\");\n");
+    fprintf(cg->out, "        raise \"fail:bad context\";\n");
+    fprintf(cg->out, "    }\n\n");
+
     fprintf(cg->out, "    sys = load Sys Sys->PATH;\n");
+    fprintf(cg->out, "    draw = load Draw Draw->PATH;\n");
     fprintf(cg->out, "    tk = load Tk Tk->PATH;\n");
     fprintf(cg->out, "    tkclient = load Tkclient Tkclient->PATH;\n\n");
+    fprintf(cg->out, "    tkclient->init();\n\n");
 
     /* Get app properties */
     const char *title = "Application";
@@ -206,16 +382,9 @@ static void codegen_init(CodeGen *cg, Program *prog) {
         }
     }
 
-    char *escaped_title = escape_tk_string(title);
-    fprintf(cg->out, "    (toplevel, nil) := tkclient->toplevel"
-            "(tkclient->plain, nil, \"%s\", Tkclient->Appl);\n\n", escaped_title);
-    free(escaped_title);
+    /* Create toplevel window - using correct API */
+    fprintf(cg->out, "    (toplevel, menubut) := tkclient->toplevel(ctxt, \"\", \"%s\", 0);\n\n", title);
 
-    fprintf(cg->out, "    # Configure main window\n");
-    fprintf(cg->out, "    tk->cmd(toplevel, \"configure -width %d -height %d -bg {%s}\");\n\n",
-            width, height, bg);
-
-    /* Build UI */
     fprintf(cg->out, "    # Build UI\n");
     cg->widget_counter = 0;
 
@@ -223,30 +392,47 @@ static void codegen_init(CodeGen *cg, Program *prog) {
         process_widget_list(cg, prog->app->body, ".", 1);
     }
 
-    /* Event loop */
-    fprintf(cg->out, "\n");
-    fprintf(cg->out, "    # Event loop\n");
-    fprintf(cg->out, "    tk->cmd(toplevel, \"pack . -expand 1 -fill both\");\n");
-    fprintf(cg->out, "    tk->cmd(toplevel, \"update\");\n\n");
+    /* Create command channel and register with Tk AFTER widget processing (which sets has_callbacks) */
+    if (cg->has_callbacks) {
+        fprintf(cg->out, "    cmd := chan of string;\n");
+        fprintf(cg->out, "    tk->namechan(toplevel, cmd, \"cmd\");\n\n");
+    }
 
-    fprintf(cg->out, "    for(;;) {\n");
-    fprintf(cg->out, "        alt {\n");
-    fprintf(cg->out, "        c := <-toplevel.ctxt =>\n");
-    fprintf(cg->out, "            if (c == nil) {\n");
-    fprintf(cg->out, "                return;\n");
-    fprintf(cg->out, "            }\n");
-    fprintf(cg->out, "            tkclient->wmctl(toplevel, c);\n");
-    fprintf(cg->out, "        s := <-toplevel.ctxt.kbd =>\n");
-    fprintf(cg->out, "            tk->keyboard(toplevel, s);\n");
-    fprintf(cg->out, "        <-toplevel.wreq ||\n");
-    fprintf(cg->out, "        <-toplevel.ctl ||\n");
-    fprintf(cg->out, "        *toplevel.ctxt.ptr =>\n");
-    fprintf(cg->out, "            ;\n");
-    fprintf(cg->out, "        }\n");
-    fprintf(cg->out, "    }\n");
+    /* Configure and show window */
+    fprintf(cg->out, "\n");
+    fprintf(cg->out, "    tk->cmd(toplevel, \"update\");\n");
+    fprintf(cg->out, "    tkclient->onscreen(toplevel, nil);\n");
+    fprintf(cg->out, "    tkclient->startinput(toplevel, \"kbd\"::\"ptr\"::nil);\n\n");
+    fprintf(cg->out, "    stop := chan of int;\n");
+    fprintf(cg->out, "    spawn tkclient->handler(toplevel, stop);\n");
+
+    if (cg->has_callbacks) {
+        fprintf(cg->out, "    for(;;) {\n");
+        fprintf(cg->out, "        alt {\n");
+        fprintf(cg->out, "        msg := <-menubut =>\n");
+        fprintf(cg->out, "            if(msg == \"exit\")\n");
+        fprintf(cg->out, "                break;\n");
+        fprintf(cg->out, "            tkclient->wmctl(toplevel, msg);\n");
+        fprintf(cg->out, "        s := <-cmd =>\n");
+
+        /* Generate callback cases */
+        Callback *cb = cg->callbacks;
+        while (cb) {
+            fprintf(cg->out, "            if(s == \"%s\")\n", cb->name);
+            fprintf(cg->out, "                %s();\n", cb->name);
+            cb = cb->next;
+        }
+
+        fprintf(cg->out, "        }\n");
+        fprintf(cg->out, "    }\n");
+    } else {
+        fprintf(cg->out, "    while((msg := <-menubut) != \"exit\")\n");
+        fprintf(cg->out, "        tkclient->wmctl(toplevel, msg);\n");
+    }
+
+    fprintf(cg->out, "    stop <-= 1;\n");
     fprintf(cg->out, "}\n");
 }
-
 int codegen_generate(FILE *out, Program *prog, const char *module_name) {
     if (!out || !prog || !module_name) {
         return -1;
@@ -271,6 +457,9 @@ int codegen_generate(FILE *out, Program *prog, const char *module_name) {
     codegen_prologue(&cg, prog);
     codegen_code_blocks(&cg, prog);
     codegen_init(&cg, prog);
+
+    /* Cleanup */
+    free_callbacks(cg.callbacks);
 
     return 0;
 }

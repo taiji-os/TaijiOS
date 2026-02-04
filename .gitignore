@@ -1,4 +1,7 @@
 # TaijiOS - Modern Inferno OS Fork
+# temp
+*.md
+jit-plan
 
 # Editor and IDE files
 .vscode/
@@ -31,6 +34,10 @@ obj.map
 vc*.pdb
 *.a
 
+# kryon related
+appl/examples/*.b
+appl/kryon/*.b
+
 # yacc artifacts
 y.output
 y.tab.[ch]
@@ -48,6 +55,8 @@ y.debug
 
 /appl/**/*.dis
 /appl/**/*.sbl
+/module/**/*.dis
+/module/**/*.sbl
 
 # generated C headers for built-in modules
 /libinterp/cryptmod.h
@@ -384,3 +393,27 @@ os/pc64/*.i
 os/pc64/primitives.s
 os/pc64/words.s
 os/pc64/forth.h
+/kryon/kryonc
+/kryon/*.o
+/kryon/*/*.o
+/kryon/parse/y.tab.c
+/kryon/parse/y.tab.h
+
+# Android build artifacts
+/android-port/app/build/
+/android-port/app/.externalNativeBuild/
+/android-port/app/.cxx/
+/android-port/build/
+/android-port/.gradle/
+/android-port/local.properties
+/android-port/*.apk
+/android-port/*.aab
+/android-port/release/
+/android-port/capture/
+/android-port/.idea/
+/android-port/*.iml
+
+# Android NDK
+/Android/*/bin/
+/Android/*/lib/
+/Android/*/include/

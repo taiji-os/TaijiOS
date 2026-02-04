@@ -2,16 +2,15 @@
 // A simple button that prints a message when clicked
 
 @limbo
-handleClick: fn(top: ref Tk->Toplevel) {
+handleClick: fn() {
     sys->print("Hello from Kryon!\n");
 };
 @end
 
-App {
+Window {
     title = "Hello World"
     width = 400
     height = 300
-    background = "#191919"
 
     Center {
         Button {

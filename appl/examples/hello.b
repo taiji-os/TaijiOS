@@ -1,58 +1,67 @@
 implement Hello;
 
 include "sys.m";
+include "draw.m";
 include "tk.m";
 include "tkclient.m";
-include "draw.m";
 
 sys: Sys;
+draw: Draw;
 tk: Tk;
 tkclient: Tkclient;
-draw: Draw;
 
-evtch: chan of string;
-
-handleClick: fn(top: ref Tk->Toplevel) {
-    sys->print("Hello from Kryon!\n");
+Hello: module
+{
+    init: fn(ctxt: ref Draw->Context, nil: list of string);
+    handleClick: fn();
 };
+
+
+handleClick()
+{
+sys->print("Hello from Kryon!\n");
+}
 
 
 init(ctxt: ref Draw->Context, nil: list of string)
 {
+    if (ctxt == nil) {
+        sys->fprint(sys->fildes(2), "app: no window context\n");
+        raise "fail:bad context";
+    }
+
     sys = load Sys Sys->PATH;
+    draw = load Draw Draw->PATH;
     tk = load Tk Tk->PATH;
     tkclient = load Tkclient Tkclient->PATH;
-    draw = load Draw Draw->PATH;
+
     tkclient->init();
 
-    sys->pctl(Sys->NEWPGRP, nil);
-
-    evtch = chan of string;
-
-    (top, titlech) := tkclient->toplevel(ctxt, "", "Hello World", Tkclient->Appl);
+    (toplevel, menubut) := tkclient->toplevel(ctxt, "", "Hello World", 0);
 
     # Build UI
-    tk->cmd(top, "frame ." );
-    tk->cmd(top, "button ..w1 -text {Click Me}" );
-    tk->cmd(top, "..w1 configure -color {white}" );
-    tk->cmd(top, "..w1 configure -backgroundColor {#404080}" );
-    tk->cmd(top, "..w1 configure -onClick {send evtch handleClick}" );
-    # Center layout
-    tk->cmd(top, "pack ..w0" );
+    tk->cmd(toplevel, ".w0 button -text {Click Me} -fg white -bg #404080 -command {send cmd handleClick}");
+    tk->cmd(toplevel, "pack .w0");
+    cmd := chan of string;
+    tk->namechan(toplevel, cmd, "cmd");
 
-    tkclient->onscreen(top, nil);
-    tkclient->startinput(top, "kbd" :: "ptr" :: nil);
 
-    # Event loop
-    for(;;) alt {
-        s := <-top.ctxt.kbd =>
-            tk->keyboard(top, s);
-        s := <-top.ctxt.ptr =>
-            tk->pointer(top, *s);
-        s := <-top.wreq or s = <-titlech =>
-            tkclient->wmctl(top, s);
-        msg := <-evtch =>
-            # Handle event: msg
-            ;
+    tk->cmd(toplevel, "update");
+    tkclient->onscreen(toplevel, nil);
+    tkclient->startinput(toplevel, "kbd"::"ptr"::nil);
+
+    stop := chan of int;
+    spawn tkclient->handler(toplevel, stop);
+    for(;;) {
+        alt {
+        msg := <-menubut =>
+            if(msg == "exit")
+                break;
+            tkclient->wmctl(toplevel, msg);
+        s := <-cmd =>
+            if(s == "handleClick")
+                handleClick();
+        }
     }
+    stop <-= 1;
 }

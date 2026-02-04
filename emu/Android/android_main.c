@@ -9,6 +9,7 @@
 #include <android/looper.h>
 #include <android/input.h>
 #include <EGL/egl.h>
+#include <android_native_app_glue.h>
 
 #include "dat.h"
 #include "fns.h"

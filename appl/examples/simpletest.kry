@@ -1,0 +1,9 @@
+Window {
+    title = "Simple Test"
+
+    Button {
+        text = "Hello World"
+        backgroundColor = "#FF0000"
+        color = "#FFFFFF"
+    }
+}

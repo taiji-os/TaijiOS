@@ -1,0 +1,11 @@
+# Solarized theme for syntax highlighting
+keyword = #268BD2
+string = #859900
+char = #859900
+number = #D33682
+comment = #93A1A1
+type = #B58900
+function = #6C71C4
+operator = #839496
+preprocessor = #CB4B16
+identifier = #657B83

@@ -364,11 +364,18 @@ static int read_code_block(void) {
         }
     }
 
-    /* Null terminate */
+    /* Null terminate and set yylval */
     if (lexer.code_buffer_len + 1 >= lexer.code_buffer_size) {
         grow_buffer();
     }
     lexer.code_buffer[lexer.code_buffer_len] = '\0';
+
+    /* Set yylval.string to the code buffer */
+    yylval.string = lexer.code_buffer;
+    /* Create a new buffer for next time */
+    lexer.code_buffer = NULL;
+    lexer.code_buffer_size = 0;
+    lexer.code_buffer_len = 0;
 
     return lexer.code_type == CODE_LIMBO ? TOKEN_LIMBO :
            lexer.code_type == CODE_TCL ? TOKEN_TCL : TOKEN_LUA;

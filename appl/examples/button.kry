@@ -15,7 +15,7 @@ handleBlue: fn(top: ref Tk->Toplevel) {
 };
 @end
 
-App {
+Window {
     title = "Button Demo"
     width = 500
     height = 400

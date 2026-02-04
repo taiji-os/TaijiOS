@@ -53,7 +53,19 @@ enum
 
 	DNotacolor	= 0xFFFFFF00,
 	DNofill		= DNotacolor,
-	
+
+	/* Syntax highlighting colors */
+	DSyntaxKw	= 0x0000FFFF,		/* Keywords - Blue */
+	DSyntaxStr	= 0x00FF00FF,		/* Strings - Green */
+	DSyntaxChr	= 0x00FF00FF,		/* Characters - Green */
+	DSyntaxNum	= 0xFF0000FF,		/* Numbers - Red */
+	DSyntaxCom	= 0x888888FF,		/* Comments - Grey */
+	DSyntaxType	= 0x800080FF,		/* Types - Purple */
+	DSyntaxFn	= 0x006400FF,		/* Functions - Dark Green */
+	DSyntaxOp	= 0x000088FF,		/* Operators - Dark Blue */
+	DSyntaxPre	= 0x8B4513FF,		/* Preprocessor - Brown */
+	DSyntaxId	= 0x000000FF,		/* Identifiers - Black (default) */
+
 };
 
 enum
