@@ -1,0 +1,4 @@
+ARCHFILES=\
+	asm-arm64.$O\
+
+# ARM64-specific assembly file will be created

@@ -1,0 +1,50 @@
+CONF=emu			#default configuration
+CONFLIST=emu
+CLEANCONFLIST=
+
+SYSTARG=Android
+<../../mkconfig
+SYSTARG=Android
+
+INSTALLDIR=$ROOT/$SYSTARG/$OBJTYPE/bin
+
+# No X11 for Android - we use OpenGL ES
+GLESLIBS= -lEGL -lGLESv3 -landroid -llog
+
+<$ROOT/mkfiles/mkfile-$SYSTARG-$OBJTYPE
+
+<| $SHELLNAME ../port/mkdevlist $CONF
+<mkfile-$OBJTYPE
+
+OBJ=\
+	asm-$OBJTYPE.$O\
+	$ARCHFILES\
+	os.$O\
+	kproc-pthreads.$O\
+	segflush-$OBJTYPE.$O\
+	$CONF.root.$O\
+	lock.$O\
+	$DEVS\
+	$PORT
+
+LIBNAMES=${LIBS:%=lib%.a}
+
+HFILES=\
+
+CFLAGS='-DROOT="'$ROOT'"' -DEMU -I. -I../port -I$ROOT/$SYSTARG/$OBJTYPE/include -I$ROOT/include -I$ROOT/libinterp $CTHREADFLAGS $CFLAGS $EMUOPTIONS -DANDROID -D__ANDROID__
+SYSLIBS= $GLESLIBS -lm -lpthread
+KERNDATE=`{$NDATE}
+
+default:V:	$O.$CONF
+
+$O.$CONF:	$OBJ $CONF.c $CONF.root.h $LIBNAMES
+	$CC $CFLAGS '-DKERNDATE='$KERNDATE $CONF.c
+	$LD $LDFLAGS -o $target $OBJ $CONF.$O $LIBFILES $SYSLIBS
+
+install:V: $O.$CONF
+	cp $O.$CONF $INSTALLDIR/$CONF
+
+<../port/portmkfile
+
+devfs.$O:	../port/devfs-posix.c
+devds.$O:	../port/devds.c
