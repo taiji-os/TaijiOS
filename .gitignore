@@ -151,6 +151,14 @@ y.debug
 /os/init/*.dis
 /os/init/*.sbl
 
+# Build system metadata (module dependency tracking)
+.all-modules
+.last-build
+
+# Test files
+test_commands
+test_shell.dis
+
 # ignore generated files
 /limbo/y.tab.c
 /os/pc64/pc64.root.[sh]

@@ -166,7 +166,7 @@ rexecproc(sync: chan of int, fio: ref Sys->FileIO)
 			(pending, nil) = removefid(fid, pending);
 			break;
 		}
-		if(offset > 0){
+		if(offset != big 0){
 			rc <-= (nil, nil);
 			break;
 		}

@@ -1,7 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-	mktypeset.dis\
 	abc.dis\
 	abctypes.dis\
 	fs.dis\

@@ -56,6 +56,30 @@ gengetwindow(Display *d, char *winname, Image **winp, Screen **scrp, int ref)
 
 #define	NINFO	12*12
 
+#ifdef __ANDROID__
+/*
+ * Android-specific initdisplay override
+ * Uses EGL surface instead of /dev/draw/new
+ */
+extern Display* android_initdisplay(void (*error)(Display*, char*));
+
+Display*
+initdisplay(char *dev, char *win, void(*error)(Display*, char*))
+{
+	Display *disp;
+
+	USED(dev);
+	USED(win);
+
+	disp = android_initdisplay(error);
+	if(disp == nil)
+		return nil;
+
+	return disp;
+}
+
+#else /* !__ANDROID__ */
+
 Display*
 initdisplay(char *dev, char *win, void(*error)(Display*, char*))
 {
@@ -200,6 +224,7 @@ initdisplay(char *dev, char *win, void(*error)(Display*, char*))
 	assert(disp->chan != 0 && image->chan != 0);
 	return disp;
 }
+#endif /* __ANDROID__ */
 
 /*
  * Call with d unlocked.

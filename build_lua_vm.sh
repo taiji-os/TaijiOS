@@ -30,15 +30,6 @@ else
     echo "✗ lua_test.b not found"
 fi
 
-# Check for example file
-echo ""
-echo "Checking example program..."
-if [ -f "appl/cmd/lua_example.b" ]; then
-    echo "✓ lua_example.b exists"
-else
-    echo "✗ lua_example.b not found"
-fi
-
 # Check for documentation
 echo ""
 echo "Checking documentation..."

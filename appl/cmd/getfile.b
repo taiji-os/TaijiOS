@@ -5,11 +5,8 @@ include "sys.m";
 	stderr: ref Sys->FD;
 include "draw.m";
 	draw: Draw;
-	Rect: import draw;
-include "tk.m";
-	tk: Tk;
-include "wmlib.m";
-	wmlib: Wmlib;
+include "selectfile.m";
+	selectfile: Selectfile;
 include "arg.m";
 
 Getfile: module
@@ -19,7 +16,7 @@ Getfile: module
 
 usage()
 {
-	sys->fprint(stderr, "usage: getfile [-g geom] [-d startdir] [pattern...]\n");
+	sys->fprint(stderr, "usage: getfile [-d startdir] [-t title] [pattern...]\n");
 	raise "fail:usage";
 }
 
@@ -28,10 +25,9 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	sys = load Sys Sys->PATH;
 	stderr = sys->fildes(2);
 	draw = load Draw Draw->PATH;
-	tk = load Tk Tk->PATH;
-	wmlib = load Wmlib Wmlib->PATH;
-	if (wmlib == nil) {
-		sys->fprint(stderr, "getfile: cannot load %s: %r\n", Wmlib->PATH);
+	selectfile = load Selectfile Selectfile->PATH;
+	if (selectfile == nil) {
+		sys->fprint(stderr, "getfile: cannot load %s: %r\n", Selectfile->PATH);
 		raise "fail:bad module";
 	}
 	arg := load Arg Arg->PATH;
@@ -45,17 +41,14 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		raise "fail:bad context";
 	}
 
-	wmlib->init();
+	sys->pctl(Sys->NEWPGRP, nil);
+	selectfile->init();
 
 	startdir := ".";
-	geom := "-x " + string (ctxt.screen.image.r.dx() / 5) +
-			" -y " + string (ctxt.screen.image.r.dy() / 5);
 	title := "Select a file";
 	arg->init(argv);
 	while (opt := arg->opt()) {
 		case opt {
-		'g' =>
-			geom = arg->arg();
 		'd' =>
 			startdir = arg->arg();
 		't' =>
@@ -65,10 +58,9 @@ init(ctxt: ref Draw->Context, argv: list of string)
 			usage();
 		}
 	}
-	if (geom == nil || startdir == nil || title == nil)
+	if (startdir == nil || title == nil)
 		usage();
-	top := tk->toplevel(ctxt.screen, geom);
 	argv = arg->argv();
 	arg = nil;
-	sys->print("%s\n", wmlib->filename(ctxt.screen, top, title, argv, startdir));
+	sys->print("%s\n", selectfile->filename(ctxt, nil, title, argv, startdir));
 }

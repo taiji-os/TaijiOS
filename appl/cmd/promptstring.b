@@ -26,7 +26,7 @@ readline(fd: ref Sys->FD, mode: int): (int, string)
 	eof = 0;
 	buf := array[128] of byte;
 	tmp := array[128] of byte;
-	
+
 	if(mode == RAWON){
 		fdctl = sys->open("/dev/consctl", sys->OWRITE);
 		if(fdctl == nil || sys->write(fdctl,array of byte "rawon",5) != 5){
@@ -58,7 +58,7 @@ readline(fd: ref Sys->FD, mode: int): (int, string)
 				if(mode == RAWON && RAWON_STR != nil)
 				   sys->write(stdout,array of byte RAWON_STR,1);
 			}
-		}		
+		}
 	}
 	if(mode == RAWON)
 		sys->write(fdctl,array of byte "rawoff",6);

@@ -1,7 +1,7 @@
 # Makefile wrapper for taiji
 # Provides convenient targets for building and running
 
-.PHONY: all build run clean help emu nuke
+.PHONY: all build run clean clean-deep help emu nuke
 
 # Default target
 all: build
@@ -10,9 +10,10 @@ all: build
 build:
 	@echo "Building TaijiOS..."
 	@if [ -f /etc/NIXOS ]; then \
-		nix-shell --run 'export PATH="$$PWD/Linux/amd64/bin:$$PATH"; mk install'; \
+		nix-shell --run 'export ROOT="$$PWD"; export PATH="$$ROOT/Linux/amd64/bin:$$PATH"; mk install'; \
 	else \
-		export PATH="$$PWD/Linux/amd64/bin:$$PATH"; \
+		export ROOT="$$PWD"; \
+		export PATH="$$ROOT/Linux/amd64/bin:$$PATH"; \
 		mk install; \
 	fi
 
@@ -36,6 +37,16 @@ clean:
 	@export PATH="$$PWD/Linux/amd64/bin:$$PATH"; export ROOT="$$PWD"; \
 	mk clean
 
+# Deep clean - remove all .dis files and build metadata
+clean-deep:
+	@echo "Deep cleaning all .dis files..."
+	find appl -name "*.dis" -delete
+	find appl -name "*.sbl" -delete
+	find appl -name ".last-build" -delete
+	find appl -name ".all-modules" -delete
+	find module -name "*.dis" -delete
+	@echo "Deep clean complete."
+
 # Complete rebuild
 nuke:
 	@echo "Removing all built files..."
@@ -49,9 +60,10 @@ help:
 	@echo "  make build   - Build TaijiOS (or use: ./run.sh)"
 	@echo "  make run     - Run Inferno emulator (or use: ./run.sh)"
 	@echo "  make emu     - Alias for 'make run'"
-	@echo "  make clean   - Clean build artifacts"
-	@echo "  make nuke    - Remove all built files"
-	@echo "  make help    - Show this help message"
+	@echo "  make clean       - Clean build artifacts"
+	@echo "  make clean-deep  - Deep clean all .dis files and metadata"
+	@echo "  make nuke        - Remove all built files"
+	@echo "  make help        - Show this help message"
 	@echo ""
 	@echo "Quick start:"
 	@echo "  On NixOS:     nix-shell"

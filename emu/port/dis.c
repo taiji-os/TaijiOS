@@ -998,8 +998,12 @@ progexit(void)
 	delprog(r, msg);
 	gcunlock();
 
+	/* On Android, don't exit the VM when last program ends - keep it running */
+	/* This allows the app to stay alive and handle window events */
+#ifndef __ANDROID__
 	if(isched.head == nil)
 		cleanexit(0);
+#endif
 }
 
 void
@@ -1059,10 +1063,18 @@ vmachine(void *a)
 	cycles = 0;
 	for(;;) {
 		if(tready(nil) == 0) {
+#ifdef __ANDROID__
+			/* On Android, don't sleep - just yield and continue */
+			/* This keeps the VM alive for window events */
+			execatidle();
+			usleep(10000);  /* Sleep 10ms to avoid busy-wait */
+			continue;
+#else
 			execatidle();
 			strcpy(up->text, "idle");
 			Sleep(&isched.irend, tready, 0);
 			strcpy(up->text, "dis");
+#endif
 		}
 
 		if(isched.vmq != nil && (isched.runhd == nil || ++cycles > 2)){

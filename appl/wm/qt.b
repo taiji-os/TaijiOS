@@ -56,7 +56,7 @@ init(xctxt: ref Draw->Context, nil: list of string)
 	ctxt = xctxt;
 
 	tkclient->init();
-	(t, menubut) := tkclient->toplevel(ctxt.screen, "", "QuickTime Player", 0);
+	(t, menubut) := tkclient->toplevel(ctxt, "", "QuickTime Player", 0);
 
 	cmd := chan of string;
 	tk->namechan(t, cmd, "cmd");
@@ -91,7 +91,7 @@ init(xctxt: ref Draw->Context, nil: list of string)
 			pat := list of {
 				"*.mov (Apple QuickTime Movie)"
 			};
-			fname = tkclient->filename(ctxt.screen, t, "Locate Movie", pat, "");
+			fname = tkclient->filename(ctxt, t.image, "Locate Movie", pat, "");
 			if(fname != nil) {
 				s := fname;
 				if(len s > 25)

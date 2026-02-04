@@ -60,7 +60,7 @@ init(xctxt: ref Draw->Context, nil: list of string)
 
 	tkclient->init();
 
-	(t, menubut)  := tkclient->toplevel(ctxt.screen, "", "Mpeg Player", Tkclient->Appl);
+	(t, menubut)  := tkclient->toplevel(ctxt, "", "Mpeg Player", Tkclient->Appl);
 
 	cmd := chan of string;
 	tk->namechan(t, cmd, "cmd");
@@ -90,7 +90,7 @@ init(xctxt: ref Draw->Context, nil: list of string)
 			pat := list of {
 				"*.mpg (MPEG movie file)"
 			};
-			fname = tkclient->filename(ctxt.screen, t, "Locate MPEG clip", pat, "");
+			fname = tkclient->filename(ctxt, t.image, "Locate MPEG clip", pat, "");
 			if(fname != nil) {
 				tk->cmd(t, ".f.name configure -text {"+fname+"}");
 				tk->cmd(t, "update");
@@ -156,7 +156,7 @@ pict(parent: ref Toplevel)
 {
 	targ := +" -borderwidth 2 -relief raised";
 
-	(t, menubut) := tkclient->toplevel(ctxt.screen, tkclient->geom(parent), "Mpeg Picture", 0);
+	(t, menubut) := tkclient->toplevel(ctxt, tkclient->geom(parent), "Mpeg Picture", 0);
 
 	pchan := chan of string;
 	tk->namechan(t, pchan, "c");

@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
@@ -27,12 +28,14 @@
 #include "fns.h"
 #include "error.h"
 #include <raise.h>
+#include <interp.h>
+#include <isa.h>
+#include <kernel.h>
+#include <draw.h>
 
 /* Forward declarations */
 typedef struct Memimage Memimage;
 typedef struct Rendez Rendez;
-typedef struct Point Point;
-typedef struct Rectangle Rectangle;
 typedef struct Pool Pool;
 typedef struct Chan Chan;
 typedef struct Block Block;
@@ -50,14 +53,6 @@ typedef struct Skeyset Skeyset;
 typedef struct DigestState DigestState;
 typedef struct Procs Procs;
 typedef struct mpint mpint;
-struct Point {
-	int x;
-	int y;
-};
-struct Rectangle {
-	Point min;
-	Point max;
-};
 
 #define LOG_TAG "TaijiOS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -191,6 +186,114 @@ extern void modinit(void);
 extern void opinit(void);
 extern void excinit(void);
 
+/* External functions from libinterp for loading and executing Dis bytecode */
+extern Module* parsemod(char *path, uchar *code, u32 length, Dir *dir);
+extern Modlink* mklinkmod(Module *m, int n);
+extern Prog* newprog(Prog *p, Modlink *m);
+extern void addrun(Prog *p);
+
+/* External function from android_test.c for loading assets */
+extern uchar* load_dis_from_assets(const char* path, int* size_out);
+
+/* External function from libinterp for scheduling Dis modules */
+extern Prog* schedmod(Module*);
+
+/* External functions for environment group initialization */
+extern Pgrp* newpgrp(void);
+extern Fgrp* newfgrp(Fgrp*);
+extern Egrp* newegrp(void);
+
+/* Reference to isched structure from emu/port/dis.c */
+extern struct {
+	Lock	l;
+	Prog*	runhd;
+	Prog*	runtl;
+	Prog*	head;
+	Prog*	tail;
+	Rendez	irend;
+	int	idle;
+	int	nyield;
+	int	creating;
+	Proc*	vmq;
+	Proc*	vmqt;
+	Proc*	idlevmq;
+	Atidle*	idletasks;
+} isched;
+
+/*
+ * Create a minimal Dir structure for in-memory module loading
+ * This bypasses the file system when loading Dis bytecode from assets
+ */
+Dir*
+fake_dir_for_module(const char* name, u32 size, u32 mtime)
+{
+	Dir* d = mallocz(sizeof(Dir), 1);
+	if (!d) {
+		LOGE("fake_dir_for_module: mallocz failed");
+		return NULL;
+	}
+
+	d->type = 0;        /* Regular file */
+	d->dev = 0x819248;  /* Fake device number */
+	d->mode = 0444;     /* Read-only */
+	d->atime = mtime;
+	d->mtime = mtime;
+	d->length = size;
+	d->name = strdup(name);
+	d->qid.type = 0;
+	d->qid.path = (uvlong)size;  /* Simple hash */
+	d->qid.vers = 0;
+	d->uid = NULL;
+	d->gid = NULL;
+	d->muid = NULL;
+
+	return d;
+}
+
+/*
+ * Load Dis bytecode from memory and return the Prog*
+ * The caller must complete initialization following disinit() pattern
+ */
+Prog*
+load_and_run_dis_module_from_memory(const char* name, uchar* code, int size)
+{
+	LOGI("load_and_run_dis_module: %s, %d bytes", name, size);
+
+	if (!code || size <= 0) {
+		LOGE("load_and_run_dis_module: Invalid code or size");
+		return NULL;
+	}
+
+	/* Create fake Dir structure */
+	Dir* d = fake_dir_for_module(name, (u32)size, (u32)time(NULL));
+	if (!d) {
+		LOGE("load_and_run_dis_module: fake_dir_for_module failed");
+		return NULL;
+	}
+
+	/* Parse Dis bytecode from memory */
+	Module* m = parsemod((char*)name, code, (u32)size, d);
+	free(d->name);
+	free(d);
+	if (!m) {
+		LOGE("load_and_run_dis_module: parsemod failed for %s", name);
+		return NULL;
+	}
+
+	LOGI("load_and_run_dis_module: Module parsed, nprog=%d", m->nprog);
+
+	/* Use schedmod() to properly schedule the module for execution */
+	/* schedmod() handles all the proper initialization: Modlink, Prog, PC, stack, etc */
+	Prog* p = schedmod(m);
+	if (!p) {
+		LOGE("load_and_run_dis_module: schedmod failed");
+		return NULL;
+	}
+
+	LOGI("load_and_run_dis_module: Process created via schedmod, pid=%d", p->pid);
+	return p;
+}
+
 /* Emulator initialization - initializes the Dis VM modules */
 void
 emuinit(void *imod)
@@ -205,16 +308,68 @@ emuinit(void *imod)
 	/* Initialize all modules */
 	modinit();
 
-	/* TODO: Load and execute init module (requires Dis bytecode files)
-	 * For now, we just initialize without loading any code
-	 * The next phase will add:
-	 * 1. Bundle Dis bytecode files with the APK
-	 * 2. Load the init module
-	 * 3. Start the VM execution loop
-	 */
-
 	LOGI("emuinit: Module initialization complete");
-	LOGI("emuinit: No init module loaded yet - waiting for further implementation");
+
+	/* Load and run a simple Dis module from assets */
+	/* Try hello.dis first (GUI button demo), then minimal.dis (fallback) */
+	static const char* test_modules[] = {
+		"dis/hello.dis",
+		"dis/minimal.dis",
+		NULL
+	};
+
+	Prog* loaded_prog = NULL;
+	for (int i = 0; test_modules[i] != NULL && !loaded_prog; i++) {
+		int size;
+		uchar* code = load_dis_from_assets(test_modules[i], &size);
+		if (code) {
+			LOGI("emuinit: Loading %s from assets", test_modules[i]);
+			loaded_prog = load_and_run_dis_module_from_memory(test_modules[i], code, size);
+			if (loaded_prog) {
+				LOGI("emuinit: Successfully loaded %s", test_modules[i]);
+			} else {
+				LOGE("emuinit: Failed to run %s", test_modules[i]);
+			}
+			/* Don't free code - parsemod may keep references to it */
+		} else {
+			LOGI("emuinit: Could not load %s from assets (file may not exist)", test_modules[i]);
+		}
+	}
+
+	if (loaded_prog) {
+		Osenv *o;
+
+		/* Initialize the process Osenv for the first Dis process */
+		/* This follows the pattern from emu/port/main.c:281-285 */
+		o = loaded_prog->osenv;
+
+		/* Initialize environment groups - required for proper process cleanup */
+		o->pgrp = newpgrp();
+		o->fgrp = newfgrp(nil);
+		o->egrp = newegrp();
+
+		/* Set up error buffers */
+		o->errstr = o->errbuf0;
+		o->syserrstr = o->errbuf1;
+
+		/* Set user to empty string like main.c does */
+		o->user = strdup("");
+		if (o->user == nil) {
+			LOGE("emuinit: strdup failed for user");
+		}
+
+		LOGI("emuinit: Process initialization complete for pid=%d", loaded_prog->pid);
+	} else {
+		LOGI("emuinit: No Dis module loaded - this is expected if assets are not bundled yet");
+	}
+
+	/* Set idle flag so startup() doesn't block */
+	/* See emu/port/dis.c:915-933 - startup() checks isched.idle */
+	isched.idle = 1;
+	LOGI("emuinit: Set isched.idle = 1, isched.head=%p, isched.runhd=%p",
+	     isched.head, isched.runhd);
+	LOGI("emuinit: Process pid=%d state=%d", loaded_prog->pid, loaded_prog->state);
+	LOGI("emuinit: Returning to libinit");
 }
 /*
  * Android: use ADB or logcat for keyboard input
@@ -574,22 +729,18 @@ validstat(uchar *d, int n)
 /* Runtime functions (acquire, release, delruntail, addrun) are in emu/port/proc.c */
 
 /* Channel operations - stub */
-int
-csend(Chan *c, void *v, Block *b)
+void
+csend(Channel *c, void *v)
 {
 	USED(c);
 	USED(v);
-	USED(b);
-	return 0;
 }
 
-int
-crecv(Chan *c, void *v, Block *b)
+void
+crecv(Channel *c, void *v)
 {
 	USED(c);
 	USED(v);
-	USED(b);
-	return 0;
 }
 
 /* DES encryption - stub */
@@ -1333,8 +1484,9 @@ ftdoneface(Face *f)
 
 /* Free dynamic data */
 void
-freedyndata(void)
+freedyndata(Modlink *ml)
 {
+	USED(ml);
 }
 
 /* killcomm is in emu/port/pgrp.c */
@@ -1631,16 +1783,16 @@ kread(int fd, void *buf, s32 len)
 }
 
 /* Dynamic module linking */
-void*
-newdyndata(void)
+void
+newdyndata(Modlink *ml)
 {
-	return nil;
+	USED(ml);
 }
 
 void
-freedyncode(void *d)
+freedyncode(Module *m)
 {
-	USED(d);
+	USED(m);
 }
 
 /* System module initialization */
@@ -1895,7 +2047,12 @@ __ieee754_yn(int n, double x)
 }
 
 /* Global float conversion */
-char gfltconv[256] = "%g";
+int
+gfltconv(Fmt *f)
+{
+	USED(f);
+	return '%g';
+}
 
 /* Kernel file stat */
 Dir*
@@ -1907,9 +2064,9 @@ kdirfstat(int fd)
 
 /* Check if file is dynamically loadable */
 int
-dynldable(char *path)
+dynldable(int fd)
 {
-	USED(path);
+	USED(fd);
 	return 0;
 }
 
@@ -1924,15 +2081,24 @@ kseek(int fd, vlong offset, int whence)
 }
 
 /* New dynamic code */
-void*
-newdyncode(int size)
+Module*
+newdyncode(int size, char *path, Dir *d)
 {
 	USED(size);
+	USED(path);
+	USED(d);
 	return nil;
 }
 
 /* System error string */
-char* syserr = "system error";
+char*
+syserr(char *buf, char *s, Prog *p)
+{
+	USED(buf);
+	USED(s);
+	USED(p);
+	return "system error";
+}
 
 /* Sys_* system call wrappers for Dis VM - these are defined in the emu/port/ layer */
 /* These stubs are placeholders - real implementations should be in port layer */
@@ -2210,17 +2376,6 @@ tkfreebind(void *b)
 	USED(b);
 }
 
-/* Display functions */
-void
-libqlock(void)
-{
-}
-
-void
-libqunlock(void)
-{
-}
-
 /* lookupimage defined in libinterp/draw.c - excluded here */
 
 Rectangle
@@ -2242,8 +2397,8 @@ void *_screen = nil;
 
 /* bufimage defined in libinterp/draw.c - excluded here */
 
-long
-libread(int fd, void *buf, long len)
+int
+libread(int fd, void *buf, int len)
 {
 	USED(fd);
 	USED(buf);
@@ -2251,10 +2406,51 @@ libread(int fd, void *buf, long len)
 	return -1;
 }
 
+/*
+ * libqlalloc - Allocate a QLock (queue lock) for display synchronization
+ * On Android, we use pthread mutex as the underlying implementation
+ */
 void*
 libqlalloc(void)
 {
-	return nil;
+	pthread_mutex_t *lock;
+
+	lock = malloc(sizeof(pthread_mutex_t));
+	if(lock == nil)
+		return nil;
+
+	if(pthread_mutex_init(lock, NULL) != 0) {
+		free(lock);
+		return nil;
+	}
+
+	return lock;
+}
+
+void
+libqlock(void *q)
+{
+	pthread_mutex_t *lock = (pthread_mutex_t*)q;
+	if(lock)
+		pthread_mutex_lock(lock);
+}
+
+void
+libqunlock(void *q)
+{
+	pthread_mutex_t *lock = (pthread_mutex_t*)q;
+	if(lock)
+		pthread_mutex_unlock(lock);
+}
+
+void
+libqlfree(void *q)
+{
+	pthread_mutex_t *lock = (pthread_mutex_t*)q;
+	if(lock) {
+		pthread_mutex_destroy(lock);
+		free(lock);
+	}
 }
 
 int
@@ -2264,12 +2460,6 @@ libbind(char *old, char *new, int flag)
 	USED(new);
 	USED(flag);
 	return -1;
-}
-
-void
-libqlfree(void *q)
-{
-	USED(q);
 }
 
 void*
@@ -2287,8 +2477,8 @@ libdirfstat(int fd)
 	return nil;
 }
 
-long
-libwrite(int fd, void *buf, long len)
+int
+libwrite(int fd, void *buf, int len)
 {
 	USED(fd);
 	USED(buf);
@@ -2703,7 +2893,7 @@ tkdupenv(char **env)
 }
 
 /* Kernel channel I/O */
-int
+long
 kchanio(void *c, void *buf, int n, int mode)
 {
 	USED(c);
@@ -2714,7 +2904,7 @@ kchanio(void *c, void *buf, int n, int mode)
 }
 
 /* Library I/O wrappers */
-long
+int
 libreadn(int fd, void *buf, long len)
 {
 	USED(fd);
@@ -2907,6 +3097,25 @@ extern Dev memdevtab;
 
 /* vflag is in emu/port/dis.c */
 
+/* Forward declarations for Android display initialization */
+extern Display* android_initdisplay(void (*error)(Display*, char*));
+extern void libqunlock(void* q);
+
+static void
+init_android_display(void)
+{
+	extern void *_display;
+
+	if(_display == nil) {
+		_display = android_initdisplay(nil);
+		if(_display) {
+			LOGI("init_android_display: Display initialized at %p", _display);
+		} else {
+			LOGE("init_android_display: Failed to initialize display");
+		}
+	}
+}
+
 /* Missing module initialization */
 void
 srvmodinit(void)
@@ -2921,6 +3130,12 @@ void
 libinit(char *imod)
 {
 	Proc *p;
+	typedef struct Osdep Osdep;
+	struct Osdep {
+		sem_t	sem;
+		pthread_t	self;
+	};
+	Osdep *os;
 
 	LOGI("libinit: Starting TaijiOS emulator");
 
@@ -2934,11 +3149,34 @@ libinit(char *imod)
 		return;
 	}
 
+	/* Initialize the os field with a semaphore for this process */
+	os = malloc(sizeof(Osdep));
+	if(os == nil) {
+		LOGE("libinit: malloc for os failed");
+		return;
+	}
+	os->self = pthread_self();  /* Set self to current thread */
+	sem_init(&os->sem, 0, 1);  /* Initialize semaphore with value 1 for main process */
+	p->os = os;
+
 	kprocinit(p);
 
 	/* Set up user environment */
 	p->env->uid = getuid();
 	p->env->gid = getgid();
+	p->env->user = strdup("");  /* Initialize user to empty string */
+	if (p->env->user == nil) {
+		LOGE("libinit: strdup failed for user");
+	}
+	p->env->errstr = p->env->errbuf0;
+	p->env->syserrstr = p->env->errbuf1;
+
+	/* Initialize Android display FIRST - before loading any Dis modules
+	 * This fixes a race condition where Dis VM code (e.g., minimal.dis)
+	 * tries to call GUI functions (tkclient->init(), tkclient->toplevel())
+	 * before the display is ready, causing SIGSEGV crashes.
+	 */
+	init_android_display();
 
 	LOGI("libinit: Calling emuinit");
 	emuinit((void*)imod);  /* emuinit takes void* per fns.h */

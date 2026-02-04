@@ -17,6 +17,10 @@ include "wmlib.m";
 	qword, splitqword, s2r: import wmlib;
 include "titlebar.m";
 	titlebar: Titlebar;
+include "dialog.m";
+	dialogmod: Dialog;
+include "selectfile.m";
+	selectfile: Selectfile;
 include "tkclient.m";
 
 Background: con int 16r777777FF;		# should be drawn over immediately, but just in case...
@@ -245,5 +249,36 @@ cmd(top: ref Tk->Toplevel, s: string): string
 	if (e != nil && e[0] == '!')
 		sys->fprint(sys->fildes(2), "tkclient: tk error %s on '%s'\n", e, s);
 	return e;
+}
+
+tkcmds(top: ref Tk->Toplevel, a: array of string)
+{
+	for(i := 0; i < len a; i++)
+		tk->cmd(top, a[i]);
+}
+
+geom(top: ref Tk->Toplevel): string
+{
+	if(top == nil || top.image == nil)
+		return nil;
+	return sys->sprint("-x %d -y %d", top.image.r.min.x + 20, top.image.r.min.y + 20);
+}
+
+dialog(top: ref Tk->Toplevel, ico: string, title: string, msg: string, dflt: int, labs: list of string): int
+{
+	d := load Dialog Dialog->PATH;
+	if(d == nil)
+		return dflt;
+	d->init();
+	return d->prompt(top.ctxt.ctxt, top.image, ico, title, msg, dflt, labs);
+}
+
+filename(ctxt: ref Draw->Context, parent: ref Draw->Image, title: string, pat: list of string, dir: string): string
+{
+	sf := load Selectfile Selectfile->PATH;
+	if(sf == nil)
+		return nil;
+	sf->init();
+	return sf->filename(ctxt, parent, title, pat, dir);
 }
 

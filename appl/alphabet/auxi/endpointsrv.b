@@ -27,7 +27,7 @@ endpointproc(addr, dir: string, fio: ref Sys->FileIO)
 	for(;;) alt {
 	(offset, nil, nil, rc) := <-fio.read =>
 		if(rc != nil){
-			if(offset > 0)
+			if(offset != big 0)
 				rc <-= (nil, nil);
 			else{
 				mkpipe(dir, string n);

@@ -6,7 +6,6 @@ TARG=\
 	create.dis\
 	dial.dis\
 	echo.dis\
-	env.dis\
 	export.dis\
 	fd.dis\
 	filter.dis\

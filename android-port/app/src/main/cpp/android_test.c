@@ -12,14 +12,166 @@
 #include <GLES2/gl2.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <string.h>
+
+/* Inferno headers - include dat.h first for all type definitions */
+#include "dat.h"
+#include "fns.h"
+#include "error.h"
+#include <draw.h>
+#include <memdraw.h>
+#include <android/asset_manager.h>
 
 #define LOG_TAG "TaijiOS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-/* Forward declaration from emu/Android/os.c */
+/* Global asset manager for loading Dis bytecode files */
+AAssetManager* g_asset_manager = NULL;
+
+/* Set the global asset manager (called from NativeActivity) */
+void set_asset_manager(AAssetManager* manager) {
+	g_asset_manager = manager;
+	LOGI("set_asset_manager: Asset manager set to %p", manager);
+}
+
+/* Read Dis file from assets into memory */
+uchar* load_dis_from_assets(const char* path, int* size_out) {
+	if (!g_asset_manager) {
+		LOGE("load_dis_from_assets: Asset manager not initialized!");
+		return NULL;
+	}
+
+	AAsset* asset = AAssetManager_open(g_asset_manager, path, AASSET_MODE_BUFFER);
+	if (!asset) {
+		LOGE("load_dis_from_assets: Failed to open %s", path);
+		return NULL;
+	}
+
+	off_t size = AAsset_getLength(asset);
+	uchar* buffer = malloc(size + 1);  /* +1 for null terminator */
+	if (!buffer) {
+		LOGE("load_dis_from_assets: Failed to allocate %ld bytes", (long)size);
+		AAsset_close(asset);
+		return NULL;
+	}
+
+	int read_result = AAsset_read(asset, buffer, size);
+	if (read_result != size) {
+		LOGE("load_dis_from_assets: Only read %d of %ld bytes", read_result, (long)size);
+		free(buffer);
+		AAsset_close(asset);
+		return NULL;
+	}
+
+	buffer[size] = '\0';  /* Null terminate for safety */
+	AAsset_close(asset);
+
+	*size_out = (int)size;
+	LOGI("load_dis_from_assets: Loaded %s, %d bytes", path, (int)size);
+	return buffer;
+}
+
+/* Forward declarations from emu/Android/os.c and emu/Android/win.c */
 extern void libinit(char *imod);
+extern void vmachine(void *arg);
 extern int dflag;
+
+/* Draw interface - from win.c */
+extern Memdata* attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen);
+extern void flushmemscreen(Rectangle r);
+
+/* Forward declarations */
+static int make_context_current(void);
+static void draw_test_pattern(void);
+
+/* Simple draw test */
+static void draw_test_pattern(void) {
+	LOGI("draw_test_pattern: Starting");
+
+	/* Make EGL context current on this thread */
+	if (!make_context_current()) {
+		LOGE("draw_test_pattern: Failed to make context current");
+		return;
+	}
+
+	Rectangle r;
+	ulong chan;
+	int depth, width, softscreen;
+
+	/* Get the screen buffer */
+	Memdata *md = attachscreen(&r, &chan, &depth, &width, &softscreen);
+	if (md == nil) {
+		LOGE("draw_test_pattern: attachscreen failed!");
+		return;
+	}
+
+	LOGI("draw_test_pattern: Screen %dx%d, chan=%lux, depth=%d",
+	     r.max.x - r.min.x, r.max.y - r.min.y, chan, depth);
+
+	/* Draw a simple test pattern directly to the screen buffer */
+	uchar *base = md->bdata;
+	int swidth = r.max.x - r.min.x;
+	int sheight = r.max.y - r.min.y;
+
+	LOGI("draw_test_pattern: Drawing test pattern...");
+
+	/* Clear to black */
+	memset(base, 0, swidth * sheight * 4);
+
+	/* Draw a red rectangle at the top */
+	int y;
+	for (y = 0; y < sheight / 4; y++) {
+		int x;
+		for (x = 0; x < swidth; x++) {
+			int offset = (y * swidth + x) * 4;
+			base[offset + 0] = 0;     /* B */
+			base[offset + 1] = 0;     /* G */
+			base[offset + 2] = 255;   /* R */
+			base[offset + 3] = 255;   /* A */
+		}
+	}
+
+	/* Draw a green rectangle in the middle */
+	for (y = sheight / 4; y < sheight / 2; y++) {
+		int x;
+		for (x = 0; x < swidth; x++) {
+			int offset = (y * swidth + x) * 4;
+			base[offset + 0] = 0;     /* B */
+			base[offset + 1] = 255;   /* G */
+			base[offset + 2] = 0;     /* R */
+			base[offset + 3] = 255;   /* A */
+		}
+	}
+
+	/* Draw a blue rectangle at the bottom */
+	for (y = sheight / 2; y < sheight * 3 / 4; y++) {
+		int x;
+		for (x = 0; x < swidth; x++) {
+			int offset = (y * swidth + x) * 4;
+			base[offset + 0] = 255;   /* B */
+			base[offset + 1] = 0;     /* G */
+			base[offset + 2] = 0;     /* R */
+			base[offset + 3] = 255;   /* A */
+		}
+	}
+
+	/* Draw a white rectangle at the bottom */
+	for (y = sheight * 3 / 4; y < sheight; y++) {
+		int x;
+		for (x = 0; x < swidth; x++) {
+			int offset = (y * swidth + x) * 4;
+			base[offset + 0] = 255;   /* B */
+			base[offset + 1] = 255;   /* G */
+			base[offset + 2] = 255;   /* R */
+			base[offset + 3] = 255;   /* A */
+		}
+	}
+
+	LOGI("draw_test_pattern: Flushing screen...");
+	flushmemscreen(r);
+	LOGI("draw_test_pattern: Complete!");
+}
 
 /* EGL state - accessible by win.c */
 EGLDisplay g_display = EGL_NO_DISPLAY;
@@ -28,6 +180,26 @@ EGLContext g_context = EGL_NO_CONTEXT;
 static ANativeActivity* g_activity = NULL;
 static pthread_t g_emu_thread = 0;
 static int g_emu_running = 0;
+
+/* Helper to make EGL context current on this thread */
+static int make_context_current(void) {
+	if (g_display == EGL_NO_DISPLAY || g_surface == EGL_NO_SURFACE) {
+		LOGE("make_context_current: EGL not initialized");
+		return 0;
+	}
+
+	/* Check if context is already current */
+	if (eglGetCurrentContext() == g_context) {
+		return 1;  /* Already current */
+	}
+
+	/* Make it current on this thread */
+	if (!eglMakeCurrent(g_display, g_surface, g_surface, g_context)) {
+		LOGE("make_context_current: eglMakeCurrent failed: 0x%x", eglGetError());
+		return 0;
+	}
+	return 1;
+}
 
 static void init_egl(ANativeWindow* window) {
 	g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -119,13 +291,15 @@ static void* emu_thread_func(void* arg) {
 
 	LOGI("Emulator thread: libinit returned");
 
-	/* Run a simple event loop */
-	while (g_emu_running) {
-		/* TODO: Process emu events, handle screen updates, etc. */
-		usleep(16667);  /* ~60 FPS */
-	}
+	/* Start the Dis VM scheduler - this will run until the VM exits */
+	LOGI("Emulator thread: Starting Dis VM scheduler");
+	LOGI("Emulator thread: About to call vmachine");
+	fflush(stdout);
+	vmachine(nil);
 
+	LOGI("Emulator thread: vmachine returned!");
 	LOGI("Emulator thread: Exiting");
+	fflush(stdout);
 	return NULL;
 }
 
@@ -193,11 +367,12 @@ static void onNativeWindowCreated(ANativeActivity* activity, ANativeWindow* wind
 	/* Start the emulator after EGL is initialized */
 	start_emulator();
 
-	/* Render a few frames to show something is happening */
-	for (int i = 0; i < 10; i++) {
-		draw_frame();
-		usleep(16667);
-	}
+	/* Wait for emulator initialization to complete, then run draw test */
+	usleep(500000);  /* 500ms for libinit to complete */
+	LOGI("Running draw test from main thread...");
+	draw_test_pattern();
+
+	/* Note: draw_frame() cleared the screen before, now removed */
 }
 
 static void onNativeWindowDestroyed(ANativeActivity* activity, ANativeWindow* window) {
@@ -212,7 +387,8 @@ static void onNativeWindowResized(ANativeActivity* activity, ANativeWindow* wind
 
 static void onNativeWindowRedrawNeeded(ANativeActivity* activity, ANativeWindow* window) {
 	LOGI("Native window redraw needed");
-	draw_frame();
+	/* Don't clear the screen - preserve what was drawn */
+	/* draw_frame(); */
 }
 
 static void onInputQueueCreated(ANativeActivity* activity, AInputQueue* queue) {
@@ -251,6 +427,9 @@ void ANativeActivity_onCreate(ANativeActivity* activity, void* savedState, size_
 
 	g_activity = activity;
 	activity->instance = activity;
+
+	/* Set the global asset manager for loading Dis bytecode files */
+	set_asset_manager(activity->assetManager);
 
 	LOGI("NativeActivity callbacks registered");
 }

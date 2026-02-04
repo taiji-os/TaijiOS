@@ -1,5 +1,5 @@
-# CMakeLists.txt for TaijiOS Android app - Full build
-# Compiles the complete TaijiOS emu layer with WM support
+# CMakeLists.txt for TaijiOS Android app
+# Compiles TaijiOS emulator with full graphics support (Phase 2 COMPLETE)
 
 cmake_minimum_required(VERSION 3.22.1)
 project("taijos-android")
@@ -46,7 +46,7 @@ set(EMU_PORT_SOURCES
 	${EMU_PORT}/devcap.c
 	${EMU_PORT}/devcmd.c
 	${EMU_PORT}/devcons.c
-	# devdraw.c excluded for Phase 1 - requires full graphics stack
+	${EMU_PORT}/devdraw.c
 	${EMU_PORT}/devdup.c
 	${EMU_PORT}/devenv.c
 	# deveia-posix.c excluded - serial port not needed for Phase 1
@@ -187,7 +187,7 @@ list(FILTER LIBINTERP_SOURCES EXCLUDE REGEX ".*das-spim.*")
 list(FILTER LIBINTERP_SOURCES EXCLUDE REGEX ".*das-stub.*")
 # Exclude test programs and files with duplicate symbols
 list(FILTER LIBINTERP_SOURCES EXCLUDE REGEX ".*decgen\\.c")
-# heapaudit.c excluded - references fakeTkTop from tk.c, not needed for Phase 1
+# heapaudit.c excluded - references fakeTkTop from tk.c, not needed for graphics
 list(FILTER LIBINTERP_SOURCES EXCLUDE REGEX ".*heapaudit\\.c")
 
 # libdraw source files
