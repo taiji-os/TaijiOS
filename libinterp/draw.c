@@ -33,6 +33,7 @@ typedef struct DDisplay DDisplay;
 typedef struct DImage DImage;
 typedef struct DScreen DScreen;
 typedef struct DFont DFont;
+typedef struct DWmcontext DWmcontext;
 
 struct Cache
 {
@@ -84,6 +85,18 @@ struct DFont
 	DRef*		dref;
 };
 
+/*
+ * DWmcontext - Window Manager Context
+ * Bridges Android input (wm.c) to Tk widgets
+ */
+struct DWmcontext
+{
+	Draw_Wmcontext	dwmcontext;	/* Limbo-visible ADT */
+	void*		wm;		/* Opaque pointer to Wmcontext from wm.c */
+	DRef*		dref;		/* Reference counting */
+	int		active;		/* Whether this is the active context */
+};
+
 Cache*	sfcache[BIHASH];
 Cache*	fcache[BIHASH];
 void*	cacheqlock;
@@ -94,11 +107,26 @@ uchar fontmap[] = Draw_Font_map;
 uchar imagemap[] = Draw_Image_map;
 uchar screenmap[] = Draw_Screen_map;
 uchar displaymap[] = Draw_Display_map;
+uchar wmcontextmap[] = Draw_Wmcontext_map;
 
 Type*	TFont;
 Type*	TImage;
 Type*	TScreen;
 Type*	TDisplay;
+Type*	TWmcontext;
+
+/*
+ * External functions from wm.c
+ */
+extern void*	wmcontext_create(void* drawctxt);
+extern void	wmcontext_ref(void* wm);
+extern void	wmcontext_unref(void* wm);
+extern void	wmcontext_close(void* wm);
+extern void	wmcontext_set_active(void* wm);
+extern void	wmcontext_clear_active(void);
+
+/* Forward declaration */
+void		freedrawwmctx(Heap*, int);
 
 Draw_Image*	allocdrawimage(DDisplay*, Draw_Rect, ulong, Image*, int, int);
 Draw_Image*	color(DDisplay*, ulong);
@@ -116,6 +144,7 @@ drawmodinit(void)
 	TImage = dtype(freedrawimage, sizeof(DImage), imagemap, sizeof(imagemap));
 	TScreen = dtype(freedrawscreen, sizeof(DScreen), screenmap, sizeof(screenmap));
 	TDisplay = dtype(freedrawdisplay, sizeof(DDisplay), displaymap, sizeof(displaymap));
+	TWmcontext = dtype(freedrawwmctx, sizeof(DWmcontext), wmcontextmap, sizeof(wmcontextmap));
 	builtinmod("$Draw", Drawmodtab, Drawmodlen);
 }
 
@@ -1437,6 +1466,51 @@ freedrawscreen(Heap *h, int swept)
 		unlockdisplay(disp);
 	display_dec(ds->dref);
 	/* screen header will be freed by caller */
+}
+
+/*
+ * freedrawwmctx - Free a Wmcontext
+ * Called by garbage collector when Wmcontext is no longer referenced
+ */
+void
+freedrawwmctx(Heap *h, int swept)
+{
+	DWmcontext *dw;
+	void *wm;
+
+	dw = H2D(DWmcontext*, h);
+	if(!swept) {
+		/* Destroy the ADT fields */
+		destroy(dw->dwmcontext.kbd);
+		destroy(dw->dwmcontext.ptr);
+		destroy(dw->dwmcontext.ctl);
+		destroy(dw->dwmcontext.wctl);
+		destroy(dw->dwmcontext.images);
+		destroy(dw->dwmcontext.connfd);
+		destroy(dw->dwmcontext.ctxt);
+	}
+
+	/* Get the underlying wm.c Wmcontext */
+	wm = dw->wm;
+
+	if(wm == nil) {
+		if(!swept)
+			freeptrs(dw, TWmcontext);
+		return;
+	}
+
+	/* Release our reference to the wm.c Wmcontext */
+	wmcontext_unref(wm);
+
+	/* Free the dref if we had one */
+	if(dw->dref != nil) {
+		/* Note: Wmcontext doesn't have a Display, so no display_dec needed */
+		free(dw->dref);
+	}
+
+	/* wmcontext header will be freed by caller */
+	if(!swept)
+		freeptrs(dw, TWmcontext);
 }
 
 void

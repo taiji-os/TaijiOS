@@ -1,6 +1,8 @@
 /*
  * Android touch input driver for TaijiOS
  * Maps Android touch events to mouse events for compatibility
+ *
+ * Phase 1: Now also routes input to active Wmcontext for Tk widgets
  */
 
 #include <android/input.h>
@@ -12,6 +14,7 @@
 #include "dat.h"
 #include "fns.h"
 #include "error.h"
+#include "wm.h"
 
 #define LOG_TAG "TaijiOS-EIA"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -43,6 +46,12 @@ static TouchState touchscreen = {
  */
 extern Queue* gkbdq;
 extern Queue* gkscanq;
+
+/*
+ * Active Wmcontext for Tk widget input routing
+ * Set when a window gains focus via wmcontext_set_active()
+ */
+extern Wmcontext* g_active_wmcontext;
 
 /*
  * Convert Android keycode to Plan 9/Inferno keysym
@@ -167,11 +176,17 @@ android_handle_input_event(struct android_app* app, AInputEvent* event)
 			return 0;
 		}
 
-		/* Send mouse event to graphics queue */
+		/* Send mouse event to graphics queue (legacy) */
 		if(gkbdq != nil) {
 			/* Format: buttons | (x << 8) | (y << 20) */
 			int mev = mouse_buttons | (touchscreen.x << 8) | (touchscreen.y << 20);
 			qproduce(gkbdq, (char*)&mev, sizeof(mev));
+		}
+
+		/* Also send to active wmcontext for Tk widgets */
+		if(g_active_wmcontext != nil) {
+			wmcontext_send_ptr(g_active_wmcontext, mouse_buttons,
+							  touchscreen.x, touchscreen.y);
 		}
 
 		return 1;
@@ -188,6 +203,11 @@ android_handle_input_event(struct android_app* app, AInputEvent* event)
 				int kev = p9key | 0x80000000;	/* Release flag */
 				qproduce(gkscanq, (char*)&kev, sizeof(kev));
 			}
+			/* Also send to active wmcontext for Tk widgets */
+			if(g_active_wmcontext != nil && p9key != 0) {
+				/* For Tk, send release with high bit set */
+				wmcontext_send_kbd(g_active_wmcontext, p9key | 0x80000000);
+			}
 			return 1;
 		}
 		else if(action == AKEY_EVENT_ACTION_DOWN) {
@@ -196,6 +216,10 @@ android_handle_input_event(struct android_app* app, AInputEvent* event)
 			if(p9key != 0) {
 				if(gkscanq != nil) {
 					qproduce(gkscanq, (char*)&p9key, sizeof(p9key));
+				}
+				/* Also send to active wmcontext for Tk widgets */
+				if(g_active_wmcontext != nil) {
+					wmcontext_send_kbd(g_active_wmcontext, p9key);
 				}
 				LOGI("Key DOWN: p9key=0x%x", p9key);
 			}

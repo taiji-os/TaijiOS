@@ -151,6 +151,10 @@ y.debug
 /os/init/*.dis
 /os/init/*.sbl
 
+# Android port generated .dis files (in assets)
+/android-port/app/src/main/assets/dis/*.dis
+/android-port/app/src/main/assets/dis/*/*.dis
+
 # Build system metadata (module dependency tracking)
 .all-modules
 .last-build

@@ -76,7 +76,7 @@ REDFLAG:	con 16r8;
 YYFLAG1:	con -1000;
 
 # parse tokens
-IDENTIFIER, MARK, TERM, LEFT, RIGHT, BINARY, PREC, LCURLY, IDENTCOLON, NUMBER, START, TYPEDEF, TYPENAME, MODULE: con PRIVATE+iota;
+IDENTIFIER, MARK, TERM, LEFT, RIGHT, BINARY, PREC, LCURLY, IDENTCOLON, NUMBER, START, TYPEDEF, TYPENAME, UNION, MODULE: con PRIVATE+iota;
 
 ENDFILE:	con 0;
 
@@ -301,7 +301,8 @@ resrv := array[] of {
 	Resrv("start",		START),
 	Resrv("term",		TERM),
 	Resrv("token",		TERM),
-	Resrv("type",		TYPEDEF),};
+	Resrv("type",		TYPEDEF),
+	Resrv("union",		UNION),};
 
 zznewstate := 0;
 
@@ -446,6 +447,10 @@ setup(argv: list of string)
 			break;
 		}
 
+	UNION =>
+		cpyunion();
+		t = gettok();
+
 	MODULE =>
 		cpymodule();
 		t = gettok();
@@ -509,7 +514,7 @@ setup(argv: list of string)
 	if(t == ENDFILE)
 		error("unexpected EOF before %%");
 	if(modname == nil)
-		error("missing %module specification");
+		modname = "Yy";	# default module name if not specified
 
 	moreprod();
 	prdptr[0] = array[4] of {
@@ -791,9 +796,21 @@ gettok(): int
 		}
 
 		# skip comment
-		if(c != '#')
-			break;
-		lineno += skipcom();
+		if(c == '#') {
+			lineno += skipcom();
+			continue;
+		}
+		# skip C-style comment
+		if(c == '/') {
+			c = finput.getc();
+			if(c == '*') {
+				lineno += skipccom();
+				continue;
+			}
+			finput.ungetc();
+			c = '/';
+		}
+		break;
 	}
 	case c {
 	Bufio->EOF =>
@@ -873,6 +890,22 @@ gettok(): int
 		if(c == '#')
 			peekline += skipcom();
 		c = finput.getc();
+	}
+	# look for C-style comments
+	if(c == '/') {
+		c = finput.getc();
+		if(c == '*') {
+			peekline += skipccom();
+			c = finput.getc();
+			while(c == ' ' || c == '\t'|| c == '\n' || c == '\v' || c == '\r') {
+				if(c == '\n')
+					peekline++;
+				c = finput.getc();
+			}
+		} else {
+			finput.ungetc();
+			c = '/';
+		}
 	}
 	if(c == ':')
 		return IDENTCOLON;
@@ -987,6 +1020,49 @@ cpycode()
 	error("eof before %%}");
 }
 
+#
+# copy the union declaration to the output
+#
+cpyunion()
+{
+	c := finput.getc();
+	if(c == '\n') {
+		c = finput.getc();
+		lineno++;
+	}
+	ftable.puts("\n#line\t" + string lineno + "\t\"" + infile + "\"\n");
+	ftable.puts("typedef union ");
+	if(fdefine != nil)
+		fdefine.puts("\ntypedef union ");
+
+	level := 0;
+	while(c != Bufio->EOF) {
+		if(c == '{') {
+			level++;
+		}
+		ftable.putc(c);
+		if(fdefine != nil)
+			fdefine.putc(c);
+
+		if(c == '}') {
+			level--;
+			if(level == 0) {
+				ftable.puts(" YYSTYPE;\n");
+				if(fdefine != nil) {
+					fdefine.puts("\tYYSTYPE;\n");
+					fdefine.puts("YYSTYPE\tyylval;\n");
+				}
+				return;
+			}
+		}
+
+		if(c == '\n')
+			lineno++;
+		c = finput.getc();
+	}
+	error("EOF encountered while processing %%union");
+}
+
 addcode(k: int, s: string)
 {
 	for(i := 0; i < len s; i++)
@@ -1080,6 +1156,29 @@ skipcom(): int
 	while(c != Bufio->EOF) {
 		if(c == '\n')
 			return 1;
+		c = finput.getc();
+	}
+	error("EOF inside comment");
+	return 0;
+}
+
+#
+# skip over C-style comments
+# skipccom is called after reading a '/' followed by a '*'
+#
+skipccom(): int
+{
+	n := 0;
+	c := finput.getc();
+	while(c != Bufio->EOF) {
+		while(c == '*') {
+			c = finput.getc();
+			if(c == '/') {
+				return n;
+			}
+		}
+		if(c == '\n')
+			n++;
 		c = finput.getc();
 	}
 	error("EOF inside comment");
@@ -1211,6 +1310,34 @@ loop:	for(;;){
 				c = finput.getc();
 			}
 			error("EOF inside comment");
+
+		'/' =>
+			# look for C-style comment
+			addcodec(CodeAct, c);
+			c = finput.getc();
+			if(c == '*') {
+				# C-style comment
+				addcodec(CodeAct, c);
+				while(c = finput.getc()) {
+					if(c == '*') {
+						addcodec(CodeAct, c);
+						c = finput.getc();
+						if(c == '/') {
+							addcodec(CodeAct, c);
+							break swt;
+						}
+					}
+					if(c == '\n')
+						lineno++;
+					if(c == Bufio->EOF) {
+						error("EOF inside comment");
+					}
+					addcodec(CodeAct, c);
+				}
+			} else {
+				# not a comment, just a slash
+				finput.ungetc();
+			}
 
 		'\''or '"' =>
 			# character string or constant

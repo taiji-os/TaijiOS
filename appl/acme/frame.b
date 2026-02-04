@@ -31,7 +31,6 @@ init(mods : ref Dat->Mods)
 	utils = mods.utils;
 	textm = mods.textm;
 
-	initnilfrbox();
 	frame = newframe();
 }
 
@@ -41,7 +40,6 @@ newframe() : ref Frame
 {
 	f := ref nullframe;
 	f.cols = array[NCOL] of ref Draw->Image;
-	f.syncols = array[SYN_NCOL] of ref Draw->Image;
 	return f;
 }
 
@@ -127,16 +125,6 @@ xfrfreebox(f : ref Frame, n0 : int, n1 : int)		# inclusive
 }
 
 nilfrbox : Frbox;
-
-initnilfrbox()
-{
-	nilfrbox.wid = 0;
-	nilfrbox.nrune = 0;
-	nilfrbox.ptr = nil;
-	nilfrbox.bc = 0;
-	nilfrbox.minwid = 0;
-	nilfrbox.coloridx = -1;  # Default: use TEXT color
-}
 
 xfrgrowbox(f : ref Frame, delta : int)
 {
@@ -416,13 +404,8 @@ frdrawsel0(f : ref Frame, pt : Point, p0 : int, p1 : int, back : ref Image, text
 		if(x > f.r.max.x)
 			x = f.r.max.x;
 		draw(f.b, (pt, (x, pt.y+f.font.height)), back, nil, pt);
-		if(b.nrune >= 0){
-			# Use syntax color if box has coloridx >= 0, otherwise use default text color
-			boxcolor := text;
-			if(b.coloridx >= 0 && b.coloridx < len f.syncols)
-				boxcolor = f.syncols[b.coloridx];
-			graph->stringx(f.b, pt, f.font, ptr[0:nr], boxcolor);
-		}
+		if(b.nrune >= 0)
+			graph->stringx(f.b, pt, f.font, ptr[0:nr], text);
 		pt.x += w;
 		p += nr;
 	}
@@ -519,7 +502,6 @@ frinit(f : ref Frame, r : Rect, ft : ref Font, b : ref Image, cols : array of re
 			break;
 		}
 	}
-	# Syntax colors are set by Text.init() - don't reset them here
 	frsetrects(f, r, b);
 	if (f.tick==nil && f.cols[BACK] != nil)
 		frinittick(f);
@@ -640,7 +622,6 @@ bxscan(f : ref Frame, rp : string, l : int, ppt : Point) : (Point, Point)
 			b.ptr = rp[ssp:sp];
 			b.wid = w;
 			b.nrune = nr;
-			b.coloridx = -1;  # Initialize to default color
 			frame.nchars += nr;
 			if (nul) {
 				for (i = 0; i < nr; i++)

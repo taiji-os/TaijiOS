@@ -155,6 +155,8 @@ set(EMU_ANDROID_SOURCES
 	${EMU_ANDROID}/emu.c
 	${EMU_ANDROID}/emu-g.c
 	${EMU_ANDROID}/win.c
+	${EMU_ANDROID}/wm.c
+	${EMU_ANDROID}/devwmctx.c
 	${CMAKE_CURRENT_SOURCE_DIR}/android_test.c
 	# ${EMU_ANDROID}/android_main.c  # Requires android_native_app_glue - add later
 	${EMU_ANDROID}/segflush-arm64.c

@@ -16,8 +16,7 @@ SYSTARG=$SYSHOST		# target system OS type (Hp, Inferno, Irix, Linux, Nt, Plan9, 
 #	specify the architecture of the target system - Inferno imports it from the
 #	environment; for other systems it is usually just hard-coded
 #
-#OBJTYPE=386			# target system object type (s800, mips, 386, arm, sparc)
-OBJTYPE=386
+OBJTYPE=amd64			# target system object type (s800, mips, 386, arm, sparc, amd64)
 
 #
 #	no changes required beyond this point

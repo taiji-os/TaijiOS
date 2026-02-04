@@ -194,9 +194,10 @@ android_main(struct android_app* state)
 			break;
 		}
 
-		/* Render a frame */
+			/* Render a frame */
 		if(g_surface_ready) {
-			/* TODO: Call Inferno's vmachine or draw handler here */
+			/* vmachine now runs in its own pthread, spawned from libinit */
+			/* The event loop only handles Android events and rendering */
 			win_swap();
 		}
 	}

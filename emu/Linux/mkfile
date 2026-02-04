@@ -21,6 +21,7 @@ OBJ=\
 	os.$O\
 	kproc-pthreads.$O\
 	segflush-$OBJTYPE.$O\
+	wm.$O\
 	$CONF.root.$O\
 	lock.$O\
 	$DEVS\

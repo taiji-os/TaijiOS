@@ -1769,6 +1769,22 @@ xec(Prog *p)
 	int op;
 
 	R = p->R;
+
+	/*
+	 * Safety check - validate R.M before dereferencing
+	 *
+	 * This can happen when:
+	 * 1. A program has exited but is still in the run queue
+	 * 2. The Modlink has been garbage collected
+	 * 3. Memory corruption has occurred
+	 *
+	 * If R.M is invalid, we skip execution and let the VM scheduler
+	 * clean up the program.
+	 */
+	if(R.M == nil || R.M == H) {
+		return;
+	}
+
 	R.MP = R.M->MP;
 	R.IC = p->quanta;
 

@@ -3,10 +3,10 @@ Framem : module {
 
 	BACK, HIGH, BORD, TEXT, HTEXT, NCOL : con iota;
 
-	# Syntax color indices (must match Syntax module)
+	# Syntax color indices
 	SYN_KWD, SYN_STR, SYN_CHR, SYN_NUM, SYN_COM,
 	SYN_TYPE, SYN_FN, SYN_OP, SYN_PRE, SYN_ID : con iota;
-	SYN_NCOL : con 10;  # Number of syntax token types
+	SYN_NCOL : con 10;
 
 	FRTICKW : con 3;
 
@@ -20,7 +20,6 @@ Framem : module {
 		ptr : string;
 		bc : int;		# break char
 		minwid : int;
-		coloridx : int;				# syntax color index (-1 for default TEXT color)
 	};
 
 	Frame : adt {

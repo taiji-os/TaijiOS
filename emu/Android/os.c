@@ -32,6 +32,7 @@
 #include <isa.h>
 #include <kernel.h>
 #include <draw.h>
+#include "../libinterp/runt.h"
 
 /* Forward declarations */
 typedef struct Memimage Memimage;
@@ -57,6 +58,9 @@ typedef struct mpint mpint;
 #define LOG_TAG "TaijiOS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+/* fdchk - convert Sys_FD* to int fd number */
+#define fdchk(x)    ((x) == (Sys_FD*)H ? -1 : (x)->fd)
 
 extern char exNilref[];
 
@@ -290,7 +294,9 @@ load_and_run_dis_module_from_memory(const char* name, uchar* code, int size)
 		return NULL;
 	}
 
-	LOGI("load_and_run_dis_module: Process created via schedmod, pid=%d", p->pid);
+	/* Add the program to the run queue so it can execute */
+	addrun(p);
+	LOGI("load_and_run_dis_module: Process created and added to run queue, pid=%d", p->pid);
 	return p;
 }
 
@@ -311,10 +317,15 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Try hello.dis first (GUI button demo), then minimal.dis (fallback) */
+	/* For debugging: try testsimple.dis first (has Sys_print calls), then others */
 	static const char* test_modules[] = {
+		"dis/testsimple.dis",  /* Has Sys_print calls that log to Android */
+		"dis/minimal.dis",     /* GUI test with button */
+		"dis/testprint.dis",
+		"dis/testnobox.dis",
+		"dis/testsleep.dis",
+		"dis/testwm.dis",
 		"dis/hello.dis",
-		"dis/minimal.dis",
 		NULL
 	};
 
@@ -368,9 +379,12 @@ emuinit(void *imod)
 	isched.idle = 1;
 	LOGI("emuinit: Set isched.idle = 1, isched.head=%p, isched.runhd=%p",
 	     isched.head, isched.runhd);
-	LOGI("emuinit: Process pid=%d state=%d", loaded_prog->pid, loaded_prog->state);
+	if (loaded_prog) {
+		LOGI("emuinit: Process pid=%d state=%d", loaded_prog->pid, loaded_prog->state);
+	}
 	LOGI("emuinit: Returning to libinit");
 }
+
 /*
  * Android: use ADB or logcat for keyboard input
  */
@@ -2103,171 +2117,209 @@ syserr(char *buf, char *s, Prog *p)
 /* Sys_* system call wrappers for Dis VM - these are defined in the emu/port/ layer */
 /* These stubs are placeholders - real implementations should be in port layer */
 
-void Sys_announce(void)
+void Sys_announce(void *fp)
 {
 }
 
-void Sys_bind(void)
+void Sys_bind(void *fp)
 {
 }
 
-void Sys_chdir(void)
+void Sys_chdir(void *fp)
 {
 }
 
-void Sys_create(void)
+void Sys_create(void *fp)
 {
 }
 
-void Sys_dial(void)
+void Sys_dial(void *fp)
 {
 }
 
-void Sys_dirread(void)
+void Sys_dirread(void *fp)
 {
 }
 
-void Sys_dup(void)
+void Sys_dup(void *fp)
 {
 }
 
-void Sys_export(void)
+void Sys_export(void *fp)
 {
 }
 
-void Sys_fildes(void)
+/* Sys_fildes - get file descriptor number (returns Sys_FD* for given fd number) */
+void Sys_fildes(void *fp)
+{
+	/* Stub: return nil for now - proper implementation requires mkfd() */
+	USED(fp);
+}
+
+void Sys_file_accessible(void *fp)
 {
 }
 
-void Sys_file_accessible(void)
+void Sys_fstat(void *fp)
 {
 }
 
-void Sys_fstat(void)
+void Sys_fwstat(void *fp)
 {
 }
 
-void Sys_fwstat(void)
+void Sys_mount(void *fp)
 {
 }
 
-void Sys_mount(void)
+/* Sys_open - open a file (returns Sys_FD*) */
+void Sys_open(void *fp)
+{
+	/* Stub: return nil for now - proper implementation requires mkfd() */
+	USED(fp);
+}
+
+/* Sys_read - read from file descriptor */
+void Sys_read(void *fp)
+{
+	F_Sys_read *f;
+
+	f = fp;
+	*f->ret = kread(fdchk(f->fd), f->buf, f->n);
+}
+
+void Sys_remove(void *fp)
 {
 }
 
-void Sys_open(void)
+void Sys_seek(void *fp)
 {
 }
 
-void Sys_read(void)
+/* Sys_sleep - sleep for milliseconds */
+void Sys_sleep(void *fp)
+{
+	F_Sys_sleep *f;
+
+	f = fp;
+	*f->ret = osmillisleep(f->period);
+}
+
+void Sys_stat(void *fp)
 {
 }
 
-void Sys_remove(void)
+void Sys_unmount(void *fp)
 {
 }
 
-void Sys_seek(void)
+void Sys_wstat(void *fp)
 {
 }
 
-void Sys_sleep(void)
+/* Sys_write - write to file descriptor */
+void Sys_write(void *fp)
+{
+	F_Sys_write *f;
+
+	f = fp;
+	*f->ret = kwrite(fdchk(f->fd), f->buf, f->n);
+}
+
+void Sys_fauth(void *fp)
 {
 }
 
-void Sys_stat(void)
+void Sys_fd2path(void *fp)
 {
 }
 
-void Sys_unmount(void)
+void Sys_file2chan(void *fp)
 {
 }
 
-void Sys_wstat(void)
+/* Sys_fprint - print to file descriptor */
+void Sys_fprint(void *fp)
+{
+	int n;
+	Prog *p;
+	char buf[1024], *b = buf;
+	F_Sys_fprint *f;
+
+	f = fp;
+	p = currun();
+	release();
+	n = xprint(p, f, &f->vargs, f->s, buf, sizeof(buf));
+	if (n >= sizeof(buf)-UTFmax-2)
+		n = bigxprint(p, f, &f->vargs, f->s, &b, sizeof(buf));
+
+	/* Logging DISABLED FOR DEBUGGING */
+
+	*f->ret = n;
+	acquire();
+}
+
+void Sys_fversion(void *fp)
 {
 }
 
-void Sys_write(void)
+void Sys_iounit(void *fp)
 {
 }
 
-void Sys_fauth(void)
+void Sys_listen(void *fp)
 {
 }
 
-void Sys_fd2path(void)
+void Sys_millisec(void *fp)
 {
 }
 
-void Sys_file2chan(void)
+void Sys_pctl(void *fp)
 {
 }
 
-void Sys_fprint(void)
+void Sys_pwrite(void *fp)
 {
 }
 
-void Sys_fversion(void)
+void Sys_readn(void *fp)
 {
 }
 
-void Sys_iounit(void)
+void Sys_awaken(void *fp)
 {
 }
 
-void Sys_listen(void)
+void Sys_alt(void *fp)
 {
 }
 
-void Sys_millisec(void)
+void Sys_exits(void *fp)
 {
 }
 
-void Sys_pctl(void)
+void Sys_disown(void *fp)
 {
 }
 
-void Sys_pwrite(void)
+void Sys_kill(void *fp)
 {
 }
 
-void Sys_readn(void)
+void Sys_main(void *fp)
 {
 }
 
-void Sys_awaken(void)
+void Sys_mals(void *fp)
 {
 }
 
-void Sys_alt(void)
+void Sys_told(void *fp)
 {
 }
 
-void Sys_exits(void)
-{
-}
-
-void Sys_disown(void)
-{
-}
-
-void Sys_kill(void)
-{
-}
-
-void Sys_main(void)
-{
-}
-
-void Sys_mals(void)
-{
-}
-
-void Sys_told(void)
-{
-}
-
-void Sys_werrstr(void)
+void Sys_werrstr(void *fp)
 {
 }
 
@@ -2336,7 +2388,7 @@ tknewobj(void *tk, void *parent, char *name, char *type)
 	return nil;
 }
 
-void Sys_stream(void)
+void Sys_stream(void *fp)
 {
 }
 
@@ -2499,9 +2551,29 @@ libqlowner(void *q)
 	return nil;
 }
 
-/* Sys_print */
-void Sys_print(void)
+/* Sys_print - print to stdout (fd 1), which we redirect to logcat */
+void Sys_print(void *fp)
 {
+	int n;
+	Prog *p;
+	char buf[1024], *b = buf;
+	F_Sys_print *f;
+
+	f = fp;
+	p = currun();
+
+	release();
+	n = xprint(p, f, &f->vargs, f->s, buf, sizeof(buf));
+	if (n >= sizeof(buf)-UTFmax-2)
+		n = bigxprint(p, f, &f->vargs, f->s, &b, sizeof(buf));
+
+	/* Log to Android logcat for debugging */
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Dis", "%.*s", n, buf);
+
+	acquire();
+
+	*f->ret = n;
+	/* Don't modify memory allocated by Limbo GC */
 }
 
 /* flushimage defined in libinterp/draw.c - excluded here */
@@ -2929,11 +3001,11 @@ libclose(int fd)
 }
 
 /* Missing Sys_* functions */
-void Sys_pipe(void)
+void Sys_pipe(void *fp)
 {
 }
 
-void Sys_pread(void)
+void Sys_pread(void *fp)
 {
 }
 
@@ -3181,7 +3253,24 @@ libinit(char *imod)
 	LOGI("libinit: Calling emuinit");
 	emuinit((void*)imod);  /* emuinit takes void* per fns.h */
 
-	LOGI("libinit: Initialization complete");
+	/*
+	 * CRITICAL FIX: Spawn vmachine as a kproc using kproc()
+	 *
+	 * The standard Inferno architecture has vmachine run in a dedicated kproc
+	 * that blocks forever in the scheduler loop. kproc() properly sets up:
+	 * 1. Thread-specific storage for the 'up' pointer (via pthread_setspecific)
+	 * 2. Environment groups (pgrp, fgrp, egrp)
+	 * 3. User credentials
+	 * 4. The 'tramp' wrapper that calls the target function
+	 *
+	 * Using raw pthread_create doesn't set up 'up' correctly, causing
+	 * NULL pointer crashes when vmachine calls startup().
+	 */
+	LOGI("libinit: Spawning vmachine as kproc");
+
+	kproc("dis", vmachine, nil, 0);
+
+	LOGI("libinit: vmachine kproc spawned, returning to Android event loop");
 }
 
 /* emuinit is declared in fns.h as: void emuinit(void*); */

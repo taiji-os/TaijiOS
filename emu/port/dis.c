@@ -6,6 +6,14 @@
 #include	"error.h"
 #include	"raise.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "TaijiOS-dis"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...)
+#endif
+
 #define DP if(1){}else print
 
 struct
@@ -1088,6 +1096,12 @@ vmachine(void *a)
 			up->env = o;
 
 			FPrestore(&o->fpu);
+
+			/* Debug: Log when program is about to execute */
+			if(r->pid == 1) {
+				LOGI("vmachine: Executing pid=%d, state=%d, PC=%p", r->pid, r->state, r->R.PC);
+			}
+
 			r->xec(r);
 			FPsave(&o->fpu);
 

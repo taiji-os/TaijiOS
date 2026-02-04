@@ -37,10 +37,64 @@ echo ""
 # Change to script directory
 cd "$(dirname "$0")"
 
+# Function to build acme modules explicitly
+build_acme_modules() {
+    echo "Building acme modules using mk..."
+    LIMBO="$ROOT/Linux/amd64/bin/limbo"
+    export PATH="$ROOT/Linux/amd64/bin:$PATH"
+
+    (cd "$ROOT/appl/acme" && mk install) || echo "  Warning: acme build failed"
+
+    echo "Acme modules build complete."
+}
+
+# Function to build wm modules explicitly
+build_wm_modules() {
+    echo "Building wm modules..."
+    LIMBO="$ROOT/Linux/amd64/bin/limbo"
+    if [ ! -f "$LIMBO" ]; then
+        echo "Error: limbo compiler not found at $LIMBO"
+        return 1
+    fi
+
+    # Build all wm .b files using the existing build-all.sh script
+    (cd "$ROOT/appl/wm" && \
+        if [ -f "build-all.sh" ]; then \
+            sh build-all.sh && \
+            sh install-all.sh && \
+            echo "  WM modules built and installed"; \
+        else \
+            # Fallback: build each .b file individually
+            for f in *.b; do \
+                dis="${f%.b}.dis"; \
+                if [ "$f" -nt "$dis" ] || [ ! -f "$dis" ]; then \
+                    echo "  Building $f..."; \
+                    "$LIMBO" -I"$ROOT/module" -gw "$f" || echo "  Warning: failed to build $dis"; \
+                fi; \
+            done; \
+            # Install all .dis files
+            for dis in *.dis; do \
+                if [ -f "$dis" ]; then \
+                    cp "$dis" "$ROOT/dis/wm/"; \
+                fi; \
+            done; \
+            echo "  WM modules built and installed"; \
+        fi)
+
+    echo "WM modules build complete."
+}
+
 # Function to build on NixOS
 build_nixos() {
     echo "Building on NixOS using nix-shell..."
+    export ROOT="$(pwd)"
     nix-shell --run "export PATH=\"\$PWD/Linux/amd64/bin:\$PATH\"; export ROOT=\"\$PWD\"; mk $CLEAN_BUILD install"
+
+    # Always rebuild acme modules to ensure they're up to date
+    build_acme_modules
+
+    # Build wm modules
+    build_wm_modules
 }
 
 # Function to build on OpenBSD
@@ -59,6 +113,12 @@ build_openbsd() {
 
     # Build and install
     mk $CLEAN_BUILD install
+
+    # Rebuild acme modules
+    build_acme_modules
+
+    # Build wm modules
+    build_wm_modules
 }
 
 # Function to build on generic Linux
@@ -82,6 +142,12 @@ build_linux() {
 
     export PATH="$PWD/Linux/amd64/bin:$PATH"
     mk $CLEAN_BUILD install
+
+    # Rebuild acme modules
+    build_acme_modules
+
+    # Build wm modules
+    build_wm_modules
 }
 
 # Build based on OS

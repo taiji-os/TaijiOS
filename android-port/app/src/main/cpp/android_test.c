@@ -281,25 +281,32 @@ static void cleanup_egl() {
 /*
  * Emulator thread - runs the TaijiOS Dis VM
  * This is where the actual emulator execution happens
+ *
+ * NOTE: vmachine is now spawned as a pthread from libinit(), so we
+ * don't call vmachine(nil) here anymore. The vmachine thread runs
+ * independently and handles all Dis VM execution.
  */
 static void* emu_thread_func(void* arg) {
 	LOGI("Emulator thread: Starting");
 
 	/* Initialize the TaijiOS emulator */
 	LOGI("Emulator thread: Calling libinit");
-	libinit("boot");  /* Start with boot module */
+	libinit("emu-g");  /* Use emu-g module (graphical version) */
 
 	LOGI("Emulator thread: libinit returned");
+	LOGI("Emulator thread: vmachine thread spawned from libinit");
 
-	/* Start the Dis VM scheduler - this will run until the VM exits */
-	LOGI("Emulator thread: Starting Dis VM scheduler");
-	LOGI("Emulator thread: About to call vmachine");
-	fflush(stdout);
-	vmachine(nil);
+	/* vmachine now runs in its own pthread, spawned from libinit */
+	/* This thread can now be used for other purposes or just wait */
 
-	LOGI("Emulator thread: vmachine returned!");
+	LOGI("Emulator thread: Waiting for VM to complete...");
+	/* TODO: Wait for vmachine thread to complete */
+	/* For now, just sleep to keep thread alive */
+	while (g_emu_running) {
+		usleep(100000);  /* 100ms */
+	}
+
 	LOGI("Emulator thread: Exiting");
-	fflush(stdout);
 	return NULL;
 }
 
@@ -367,12 +374,7 @@ static void onNativeWindowCreated(ANativeActivity* activity, ANativeWindow* wind
 	/* Start the emulator after EGL is initialized */
 	start_emulator();
 
-	/* Wait for emulator initialization to complete, then run draw test */
-	usleep(500000);  /* 500ms for libinit to complete */
-	LOGI("Running draw test from main thread...");
-	draw_test_pattern();
-
-	/* Note: draw_frame() cleared the screen before, now removed */
+	/* The VM will render to the screen through flushmemscreen() calls */
 }
 
 static void onNativeWindowDestroyed(ANativeActivity* activity, ANativeWindow* window) {

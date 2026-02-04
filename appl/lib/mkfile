@@ -14,9 +14,9 @@ DIRS=\
 	w3c\
 
 TARG=\
-	syntax.dis\
 	arg.dis\
 	arrays.dis\
+	syntax.dis\
 	asn1.dis\
 	attrdb.dis\
 	attrhash.dis\
@@ -166,6 +166,7 @@ MODULES=
 
 SYSMODULES= \
 	bufio.m\
+	syntax.m\
 	cci.m\
 	daytime.m\
 	db.m\

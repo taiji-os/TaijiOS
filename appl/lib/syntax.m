@@ -3,16 +3,8 @@ Syntax : module {
 
 	# Token type constants
 	TKWD, TSTR, TCHR, TNUM, TCOM, TTYPE, TFN, TOP, TPRE, TID : con iota;
+	SYN_NCOL : con 10;
 
-	# Initialization
-	init : fn();
-
-	# Language detection
-	detect : fn(filename : string, content : string) : string;
-
-	# Tokenization - returns array of (start, end, type)
-	gettokens : fn(lang : string, text : string, max : int) : array of (int, int, int);
-
-	# Configuration check
-	enabled : fn() : int;
+	init : fn(mods : ref Dat->Mods);
+	enabled : fn() : int;  # Returns 0 (disabled) initially
 };
