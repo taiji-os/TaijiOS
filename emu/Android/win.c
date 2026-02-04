@@ -175,7 +175,7 @@ static int initGLEResources(void)
 /*
  * attachscreen - Create the screen buffer
  * Called by devdraw.c to initialize the screen
- * Returns pointer to screen data, or nil on failure
+ * Returns pointer to Memdata, or nil on failure
  */
 Memdata*
 attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
@@ -285,30 +285,10 @@ flushmemscreen(Rectangle r)
 }
 
 /*
- * setcursor - Set mouse cursor (stub for Android)
- */
-void
-setcursor(Cursor *c)
-{
-	USED(c);
-	/* TODO: Implement cursor rendering if needed */
-}
-
-/*
- * getcursor - Get mouse cursor (stub for Android)
- */
-void
-getcursor(Cursor *c)
-{
-	USED(c);
-	/* TODO: Implement cursor rendering if needed */
-}
-
-/*
  * drawcursor - Draw cursor on screen (stub for Android)
  */
 void
-drawcursor(DrawCursor *c)
+drawcursor(Drawcursor *c)
 {
 	USED(c);
 	/* TODO: Implement cursor rendering if needed */

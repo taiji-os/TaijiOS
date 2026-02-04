@@ -440,13 +440,7 @@ memlfree(Memimage *m)
 	USED(m);
 }
 
-Memimage*
-attachscreen(char *label, char *win)
-{
-	USED(label);
-	USED(win);
-	return nil;
-}
+/* attachscreen is in emu/Android/win.c */
 
 /* Sleep and Wakeup are implemented in emu/port/proc.c */
 
@@ -550,11 +544,7 @@ memload(Memimage *m, Rectangle r, uchar *data, int n)
 	return n;
 }
 
-void
-flushmemscreen(Rectangle r)
-{
-	(void)r;
-}
+/* flushmemscreen is in emu/Android/win.c */
 
 void
 exhausted(char *s)

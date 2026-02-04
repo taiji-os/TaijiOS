@@ -21,9 +21,10 @@
 extern void libinit(char *imod);
 extern int dflag;
 
-static EGLDisplay g_display = EGL_NO_DISPLAY;
-static EGLSurface g_surface = EGL_NO_SURFACE;
-static EGLContext g_context = EGL_NO_CONTEXT;
+/* EGL state - accessible by win.c */
+EGLDisplay g_display = EGL_NO_DISPLAY;
+EGLSurface g_surface = EGL_NO_SURFACE;
+EGLContext g_context = EGL_NO_CONTEXT;
 static ANativeActivity* g_activity = NULL;
 static pthread_t g_emu_thread = 0;
 static int g_emu_running = 0;
