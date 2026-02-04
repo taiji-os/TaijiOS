@@ -40,6 +40,7 @@ newframe() : ref Frame
 {
 	f := ref nullframe;
 	f.cols = array[NCOL] of ref Draw->Image;
+	f.syncols = array[SYN_NCOL] of ref Draw->Image;
 	return f;
 }
 
@@ -502,6 +503,10 @@ frinit(f : ref Frame, r : Rect, ft : ref Font, b : ref Image, cols : array of re
 			break;
 		}
 	}
+	# Initialize syntax colors to default (text color)
+	# These will be set by Text module if syntax highlighting is enabled
+	for(i := 0; i < SYN_NCOL; i++)
+		f.syncols[i] = f.cols[TEXT];
 	frsetrects(f, r, b);
 	if (f.tick==nil && f.cols[BACK] != nil)
 		frinittick(f);

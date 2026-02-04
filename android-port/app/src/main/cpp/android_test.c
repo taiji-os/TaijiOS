@@ -1,6 +1,6 @@
 /*
- * Minimal TaijiOS Android test
- * Simple native activity that logs and clears screen
+ * TaijiOS Android Native Activity
+ * Initializes and runs the TaijiOS emulator
  */
 
 #include <android/log.h>
@@ -11,15 +11,22 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define LOG_TAG "TaijiOS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+/* Forward declaration from emu/Android/os.c */
+extern void libinit(char *imod);
+extern int dflag;
+
 static EGLDisplay g_display = EGL_NO_DISPLAY;
 static EGLSurface g_surface = EGL_NO_SURFACE;
 static EGLContext g_context = EGL_NO_CONTEXT;
 static ANativeActivity* g_activity = NULL;
+static pthread_t g_emu_thread = 0;
+static int g_emu_running = 0;
 
 static void init_egl(ANativeWindow* window) {
 	g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -98,9 +105,67 @@ static void cleanup_egl() {
 	g_surface = EGL_NO_SURFACE;
 }
 
-// Callbacks
+/*
+ * Emulator thread - runs the TaijiOS Dis VM
+ * This is where the actual emulator execution happens
+ */
+static void* emu_thread_func(void* arg) {
+	LOGI("Emulator thread: Starting");
+
+	/* Initialize the TaijiOS emulator */
+	LOGI("Emulator thread: Calling libinit");
+	libinit("boot");  /* Start with boot module */
+
+	LOGI("Emulator thread: libinit returned");
+
+	/* Run a simple event loop */
+	while (g_emu_running) {
+		/* TODO: Process emu events, handle screen updates, etc. */
+		usleep(16667);  /* ~60 FPS */
+	}
+
+	LOGI("Emulator thread: Exiting");
+	return NULL;
+}
+
+/*
+ * Start the emulator thread when the window is ready
+ */
+static void start_emulator() {
+	if (g_emu_thread != 0) {
+		LOGI("Emulator already running");
+		return;
+	}
+
+	g_emu_running = 1;
+	int result = pthread_create(&g_emu_thread, NULL, emu_thread_func, NULL);
+	if (result != 0) {
+		LOGE("Failed to create emulator thread: %d", result);
+		return;
+	}
+
+	LOGI("Emulator thread started");
+}
+
+/*
+ * Stop the emulator thread
+ */
+static void stop_emulator() {
+	if (g_emu_thread == 0) {
+		return;
+	}
+
+	g_emu_running = 0;
+	pthread_join(g_emu_thread, NULL);
+	g_emu_thread = 0;
+
+	LOGI("Emulator thread stopped");
+}
+
+/* Callbacks */
 static void onDestroy(ANativeActivity* activity) {
 	LOGI("onDestroy");
+	stop_emulator();
 	cleanup_egl();
 }
 
@@ -124,7 +189,10 @@ static void onNativeWindowCreated(ANativeActivity* activity, ANativeWindow* wind
 	LOGI("Native window created");
 	init_egl(window);
 
-	// Render a few frames
+	/* Start the emulator after EGL is initialized */
+	start_emulator();
+
+	/* Render a few frames to show something is happening */
 	for (int i = 0; i < 10; i++) {
 		draw_frame();
 		usleep(16667);
@@ -133,6 +201,7 @@ static void onNativeWindowCreated(ANativeActivity* activity, ANativeWindow* wind
 
 static void onNativeWindowDestroyed(ANativeActivity* activity, ANativeWindow* window) {
 	LOGI("Native window destroyed");
+	stop_emulator();
 	cleanup_egl();
 }
 
@@ -157,10 +226,14 @@ static void onWindowFocusChanged(ANativeActivity* activity, int focused) {
 	LOGI("Window focus changed: %d", focused);
 }
 
-// NativeActivity entry point
+/* NativeActivity entry point */
 void ANativeActivity_onCreate(ANativeActivity* activity, void* savedState, size_t savedStateSize) {
-	LOGI("TaijiOS Android port - Test Version");
+	LOGI("TaijiOS Android port - Emulator Version");
 	LOGI("Device: 9B161FFAZ000FP");
+	LOGI("Initializing TaijiOS emulator...");
+
+	/* Set debug flag for more verbose output */
+	dflag = 1;
 
 	activity->callbacks->onDestroy = onDestroy;
 	activity->callbacks->onStart = onStart;
@@ -177,4 +250,6 @@ void ANativeActivity_onCreate(ANativeActivity* activity, void* savedState, size_
 
 	g_activity = activity;
 	activity->instance = activity;
+
+	LOGI("NativeActivity callbacks registered");
 }

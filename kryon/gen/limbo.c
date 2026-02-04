@@ -358,6 +358,9 @@ static void codegen_init(CodeGen *cg, Program *prog) {
     int width = 400;
     int height = 300;
     const char *bg = "#191919";
+    int has_width = 0;
+    int has_height = 0;
+    int has_bg = 0;
 
     if (prog->app && prog->app->props) {
         Property *prop = prog->app->props;
@@ -368,15 +371,19 @@ static void codegen_init(CodeGen *cg, Program *prog) {
             } else if (strcmp(prop->name, "width") == 0 && prop->value &&
                        prop->value->type == VALUE_NUMBER) {
                 width = prop->value->v.number_val;
+                has_width = 1;
             } else if (strcmp(prop->name, "height") == 0 && prop->value &&
                        prop->value->type == VALUE_NUMBER) {
                 height = prop->value->v.number_val;
+                has_height = 1;
             } else if (strcmp(prop->name, "background") == 0 && prop->value &&
                        prop->value->type == VALUE_COLOR) {
                 bg = prop->value->v.color_val;
+                has_bg = 1;
             } else if (strcmp(prop->name, "backgroundColor") == 0 && prop->value &&
                        prop->value->type == VALUE_COLOR) {
                 bg = prop->value->v.color_val;
+                has_bg = 1;
             }
             prop = prop->next;
         }
@@ -384,6 +391,19 @@ static void codegen_init(CodeGen *cg, Program *prog) {
 
     /* Create toplevel window - using correct API */
     fprintf(cg->out, "    (toplevel, menubut) := tkclient->toplevel(ctxt, \"\", \"%s\", 0);\n\n", title);
+
+    /* Configure window size and background if explicitly specified */
+    if (has_width && has_height) {
+        fprintf(cg->out, "    tk->cmd(toplevel, \". configure -width %d -height %d\");\n", width, height);
+    } else if (has_width) {
+        fprintf(cg->out, "    tk->cmd(toplevel, \". configure -width %d\");\n", width);
+    } else if (has_height) {
+        fprintf(cg->out, "    tk->cmd(toplevel, \". configure -height %d\");\n", height);
+    }
+    if (has_bg) {
+        fprintf(cg->out, "    tk->cmd(toplevel, \". configure -bg %s\");\n", bg);
+    }
+    fprintf(cg->out, "\n");
 
     fprintf(cg->out, "    # Build UI\n");
     cg->widget_counter = 0;

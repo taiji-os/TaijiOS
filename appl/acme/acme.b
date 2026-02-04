@@ -34,6 +34,7 @@ editm: Edit;
 editlog: Editlog;
 editcmd: Editcmd;
 styxaux: Styxaux;
+syntaxm: Syntax;
 
 sprint : import sys;
 BACK, HIGH, BORD, TEXT, HTEXT, NCOL : import Framem;
@@ -125,14 +126,16 @@ init(ctxt : ref Draw->Context, argl : list of string)
 	editlog = load Editlog path(Editlog->PATH);
 	editcmd = load Editcmd path(Editcmd->PATH);
 	styxaux = load Styxaux path(Styxaux->PATH);
-	
-	mods := ref Dat->Mods(sys, bufio, env, arg, 
+	syntaxm = load Syntax Syntax->PATH;
+
+	mods := ref Dat->Mods(sys, bufio, env, arg,
 					drawm, styx, styxaux,
 					acme, gui, graph, dat, framem,
 					utils, regx, scrl,
 					textm, filem, windowm, rowm, columnm,
 					bufferm, diskm, exec, look, timerm,
-					fsys, xfidm, plumbmsg, editm, editlog, editcmd);
+					fsys, xfidm, plumbmsg, editm, editlog, editcmd,
+					syntaxm);
 
 	arg->init(argl);
 	styx->init();
@@ -203,6 +206,7 @@ init(ctxt : ref Draw->Context, argl : list of string)
 	editm->init(mods);
 	editlog->init(mods);
 	editcmd->init(mods);
+	syntaxm->init(mods);
 
 	utils->debuginit();
 

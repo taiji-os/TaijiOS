@@ -283,7 +283,7 @@ static int read_code_block(void) {
 
         if (c == EOF) {
             fprintf(stderr, "Unterminated code block at line %d\n", lexer.lineno);
-            return TOKEN_EOF;
+            return 0;
         }
 
         /* Check for @end */
@@ -391,7 +391,7 @@ int yylex(void) {
     int c = peek_char();
 
     if (c == EOF) {
-        return TOKEN_EOF;
+        return 0;  /* yacc expects 0 for EOF, not TOKEN_EOF */
     }
 
     /* Check for @ keyword/code block start */

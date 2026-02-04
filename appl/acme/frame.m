@@ -3,6 +3,11 @@ Framem : module {
 
 	BACK, HIGH, BORD, TEXT, HTEXT, NCOL : con iota;
 
+	# Syntax color indices (must match Syntax module)
+	SYN_KWD, SYN_STR, SYN_CHR, SYN_NUM, SYN_COM,
+	SYN_TYPE, SYN_FN, SYN_OP, SYN_PRE, SYN_ID : con iota;
+	SYN_NCOL : con 10;  # Number of syntax token types
+
 	FRTICKW : con 3;
 
 	init : fn(mods : ref Dat->Mods);
@@ -21,6 +26,7 @@ Framem : module {
 		font : ref Draw->Font;		# of chars in the frame
 		b : ref Draw->Image;		# on which frame appears
 		cols : array of ref Draw->Image;	# colours
+		syncols : array of ref Draw->Image;	# syntax colors
 		r : Draw->Rect;				# in which text appears
 		entire : Draw->Rect;			# of full frame
 		box : array of ref Frbox;

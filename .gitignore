@@ -37,6 +37,7 @@ vc*.pdb
 # kryon related
 appl/examples/*.b
 appl/kryon/*.b
+kryon/kryonc
 
 # yacc artifacts
 y.output

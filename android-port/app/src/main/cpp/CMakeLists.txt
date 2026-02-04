@@ -132,6 +132,7 @@ set(LIB9_SOURCES
 # Android-specific source files
 set(EMU_ANDROID_SOURCES
 	${EMU_ANDROID}/os.c
+	${EMU_ANDROID}/emu.c
 	${EMU_ANDROID}/emu-g.c
 	${CMAKE_CURRENT_SOURCE_DIR}/android_test.c
 	# ${EMU_ANDROID}/android_main.c  # Requires android_native_app_glue - add later

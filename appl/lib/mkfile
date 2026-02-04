@@ -14,6 +14,7 @@ DIRS=\
 	w3c\
 
 TARG=\
+	syntax.dis\
 	arg.dis\
 	arrays.dis\
 	asn1.dis\
@@ -221,6 +222,10 @@ DISBIN=$ROOT/dis/lib
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
+
+# Install syntax module interface file
+install:V:
+	if test -f syntax.m; then cp syntax.m $ROOT/module/; fi
 
 plumbing.dis:N: plumbing.m
 plumber.dis:N: plumbing.m

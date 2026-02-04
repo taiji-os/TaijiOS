@@ -183,63 +183,20 @@ osreboot(char *file, char **argv)
 	error("reboot failure");
 }
 
+/* Note: libinit and emuinit are defined below (Android-specific versions) */
+
+/* Emulator initialization - loads the Dis VM modules and starts execution */
 void
-libinit(char *imod)
+emuinit(void *imod)
 {
-	struct sigaction act;
-	Proc *p;
-	char sys[64];
-	struct passwd *pw;
+	USED(imod);
+	LOGI("emuinit: TaijiOS emulator starting");
 
-	setsid();
+	/* Initialize the module system */
+	modinit();
 
-	gethostname(sys, sizeof(sys));
-	kstrdup(&ossysname, sys);
-
-	pw = getpwnam("nobody");
-	if(pw != nil) {
-		uidnobody = pw->pw_uid;
-		gidnobody = pw->pw_gid;
-	}
-
-	/* Set up signal handlers for Android */
-	memset(&act, 0, sizeof(act));
-	act.sa_handler = SIG_IGN;
-	sigaction(SIGCHLD, &act, nil);
-	sigaction(SIGPIPE, &act, nil);
-
-	if(signal(SIGTERM, SIG_IGN) != SIG_IGN)
-		signal(SIGTERM, cleanexit);
-	if(signal(SIGINT, SIG_IGN) != SIG_IGN)
-		signal(SIGINT, cleanexit);
-
-	if(sflag == 0) {
-		act.sa_flags = SA_SIGINFO;
-		act.sa_sigaction = trapILL;
-		sigaction(SIGILL, &act, nil);
-		act.sa_sigaction = trapFPE;
-		sigaction(SIGFPE, &act, nil);
-		act.sa_sigaction = trapmemref;
-		sigaction(SIGBUS, &act, nil);
-		sigaction(SIGSEGV, &act, nil);
-		act.sa_flags &= ~SA_SIGINFO;
-	}
-
-	p = newproc();
-	kprocinit(p);
-
-	pw = getpwuid(getuid());
-	if(pw != nil)
-		kstrdup(&eve, pw->pw_name);
-	else
-		print("cannot getpwuid\n");
-
-	p->env->uid = getuid();
-	p->env->gid = getgid();
-
-	emuinit(imod);
+	LOGI("emuinit: Module initialization complete");
 }
-
 /*
  * Android: use ADB or logcat for keyboard input
  */
@@ -1243,13 +1200,7 @@ latin1(uchar *p, int n)
 /* Keyboard scan ID for console */
 int gkscanid = 0;
 
-/* Emulator initialization - called from libinit */
-void
-emuinit(void *imod)
-{
-	USED(imod);
-	LOGI("TaijiOS emulator initialized");
-}
+/* emuinit is defined below with correct signature */
 
 /* Current running process */
 Proc *currun = nil;
@@ -3154,10 +3105,9 @@ libinit(char *imod)
 	p->env->gid = getgid();
 
 	LOGI("libinit: Calling emuinit");
-	emuinit(imod);
+	emuinit((void*)imod);  /* emuinit takes void* per fns.h */
 
 	LOGI("libinit: Initialization complete");
 }
 
-/* Forward declaration - emuinit is provided by the compiled code */
-extern void emuinit(char*);
+/* emuinit is declared in fns.h as: void emuinit(void*); */
