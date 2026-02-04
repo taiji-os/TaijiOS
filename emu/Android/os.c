@@ -234,6 +234,34 @@ readkbd(void)
 }
 
 /*
+ * Fast tick counter for Android
+ * Uses clock_gettime with CLOCK_MONOTONIC for high resolution
+ */
+static uvlong fasthz = 0;
+
+uvlong
+osfastticks(void)
+{
+	struct timespec ts;
+
+	if(fasthz == 0) {
+		/* Calibrate the clock frequency */
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		fasthz = 1000000000;	/* nanoseconds per second */
+	}
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uvlong)ts.tv_sec * fasthz + ts.tv_nsec;
+}
+
+uvlong
+osfastticks2ns(uvlong ticks)
+{
+	if(fasthz == 0)
+		return ticks;
+	return ticks * 1000000000 / fasthz;
+}
+
+/*
  * Return an arbitrary millisecond clock time
  */
 long
