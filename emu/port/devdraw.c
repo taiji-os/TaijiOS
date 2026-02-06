@@ -14,6 +14,7 @@
  * Weak symbols so other platforms don't need to implement them
  */
 #if defined(__ANDROID__)
+#include <android/log.h>
 extern void wmcontext_notify_window_created(Memimage* layerimg, Rectangle screenr);
 extern void wmcontext_notify_window_destroyed(Memimage* layerimg);
 #else
@@ -751,6 +752,8 @@ drawnewclient(void)
 	Client *cl, **cp;
 	int i;
 
+	print("drawnewclient: ENTRY\n");
+
 	for(i=0; i<sdraw.nclient; i++){
 		cl = sdraw.client[i];
 		if(cl == 0)
@@ -774,6 +777,28 @@ drawnewclient(void)
 	cl->clientid = ++sdraw.clientid;
 	cl->op = SoverD;
 	sdraw.client[i] = cl;
+
+	/*
+	 * CRITICAL FIX: Install screenimage as DImage id 0 for this client.
+	 *
+	 * This allows wmclient to use display.image (which has id=0) as the
+	 * backing image for screens. When Screen.allocate(display.image) is called,
+	 * the draw device will look up DImage id 0, which now points to screenimage.
+	 * This ensures that wmclient windows draw to the same buffer that
+	 * flushmemscreen() renders.
+	 */
+	print("drawnewclient: installing screenimage as id 0, screenimage=%p\n", screenimage);
+	if(screenimage != nil) {
+		if(drawinstall(cl, 0, screenimage, nil) == 0) {
+			/* Non-fatal - screen should still work */
+			print("drawnewclient: warning: failed to install screenimage as id 0\n");
+		} else {
+			print("drawnewclient: successfully installed screenimage as id 0\n");
+		}
+	} else {
+		print("drawnewclient: screenimage is nil, skipping install\n");
+	}
+
 	return cl;
 }
 
@@ -883,8 +908,12 @@ initscreenimage(void)
 	ulong chan;
 	Rectangle r;
 
-	if(screenimage != nil)
+	print("initscreenimage: ENTRY\n");
+
+	if(screenimage != nil) {
+		print("initscreenimage: screenimage already initialized\n");
 		return 1;
+	}
 
 	memimageinit();
 	screendata.base = nil;
@@ -901,6 +930,35 @@ initscreenimage(void)
 
 	screenimage->width = width;
 	screenimage->clipr = r;
+
+	/*
+	 * CRITICAL FIX: Install screenimage as DImage id 0 for all existing clients.
+	 *
+	 * This allows wmclient to use display.image (which has id=0) as the
+	 * backing image for screens. When Screen.allocate(display.image) is called,
+	 * the draw device will look up DImage id 0, which now points to screenimage.
+	 *
+	 * We do this here because initscreenimage may be called after clients
+	 * are created, and we need to ensure all clients have access to screenimage.
+	 */
+	print("initscreenimage: installing screenimage as id 0 for %d clients\n", sdraw.nclient);
+	for(int i = 0; i < sdraw.nclient; i++) {
+		Client *cl = sdraw.client[i];
+		if(cl != nil) {
+			/* Check if client already has DImage id 0 */
+			DImage *existing = drawlookup(cl, 0, 0);
+			if(existing == nil) {
+				if(drawinstall(cl, 0, screenimage, nil) != 0) {
+					print("initscreenimage: installed screenimage as id 0 for client %d\n", i);
+				} else {
+					print("initscreenimage: failed to install screenimage for client %d\n", i);
+				}
+			} else {
+				print("initscreenimage: client %d already has DImage id 0\n", i);
+			}
+		}
+	}
+
 	return 1;
 }
 

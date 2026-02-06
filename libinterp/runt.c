@@ -5,71 +5,8 @@
 #include "sysmod.h"
 #include "raise.h"
 
+
 static	int		utfnleng(char*, int, int*);
-
-extern char* string2c(String*);
-
-/*
- * Safe conversion of String to C string for xprint
- * Returns pointer to static buffer with null-terminated string
- * Returns empty string if String is invalid or inaccessible
- */
-static char*
-safe_string2c(String *s)
-{
-	static char buf[2048];
-	int len, i;
-	char *src;
-	uintptr_t str_addr, data_addr;
-
-	/* Validate String pointer thoroughly */
-	if(s == H || (uintptr_t)s < 0x1000)
-		return "";
-
-	str_addr = (uintptr_t)s;
-
-	/* Additional validation: check if pointer is in a reasonable range */
-	/* User space on ARM64 is typically up to 0x0000007fffffffffff */
-	if(str_addr > 0x0000800000000000ULL)
-		return "";
-
-	/* Calculate where the data (Sascii) starts - it's after len, max, tmp */
-	/* sizeof(String) header = sizeof(int)*2 + sizeof(char*) + padding */
-	data_addr = str_addr + 16;  /* Approximate offset to Sascii */
-
-	/* If data would be beyond a reasonable range, reject */
-	if(data_addr > 0x0000800000000000ULL - 2048)
-		return "";
-
-	/* Read the length field */
-	len = s->len;
-
-	if(len >= 0) {
-		if(len < 0 || len > (int)sizeof(buf) - 1)
-			len = sizeof(buf) - 1;
-
-		/* Calculate the actual data address */
-		src = s->Sascii;
-
-		/* Check if reading len bytes from src would overflow */
-		if((uintptr_t)src + len > 0x0000800000000000ULL)
-			return "";
-
-		for(i = 0; i < len; i++) {
-			buf[i] = src[i];
-		}
-		buf[len] = '\0';
-		return buf;
-	}
-
-	len = -len;
-	if(len < 0 || len > (int)(sizeof(buf) / UTFmax) - 1)
-		len = (sizeof(buf) / UTFmax) - 1;
-
-	/* For Rune strings, just return empty for now */
-	buf[0] = '\0';
-	return buf;
-}
 
 void
 sysmodinit(void)
@@ -77,8 +14,6 @@ sysmodinit(void)
 	sysinit();
 	builtinmod("$Sys", Sysmodtab, Sysmodlen);
 }
-
-#define FMTBUF_SIZE 128
 
 int
 xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
@@ -91,52 +26,28 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 	String *ss;
 	ulong *ptr;
 	uchar *fp, *va;
-	int nc, c, isbig;
-	char *b, *eb, *f, fmt[FMTBUF_SIZE];
+	int nc, c, isbig, isr, sip;
+	char *b, *eb, *f, fmt[32];
 	Rune r;
-	char *fmt_cstr;
-	int fmt_pos;
-	int fmt_len;
 
 	fp = vfp;
 	va = vva;
 
+	sip = 0;
+	isr = 0;
+	if(s1 == H)
+		return 0;
+	nc = s1->len;
+	if(nc < 0) {
+		nc = -nc;
+		isr = 1;
+	}
+
 	b = buf;
-	eb = buf + n - 1;
-
-	/* Validate format string pointer first */
-	if(s1 == H || (uintptr_t)s1 < 0x1000) {
-		if(n > 0)
-			buf[0] = '\0';
-		return 0;
-	}
-
-	/* Get format string length */
-	fmt_len = s1->len;
-	if(fmt_len < 0)
-		fmt_len = -fmt_len;
-
-	/* Validate format string length */
-	if(fmt_len > 65536) {
-		if(n > 0)
-			buf[0] = '\0';
-		return 0;
-	}
-
-	/* Convert format String to C string */
-	fmt_cstr = safe_string2c(s1);
-	if(fmt_cstr == NULL || fmt_cstr[0] == '\0') {
-		if(n > 0)
-			buf[0] = '\0';
-		return 0;
-	}
-
-	fmt_pos = 0;
-
-	/* Process format string character by character */
-	while(fmt_cstr[fmt_pos] != '\0' && (b - buf) < n - 1) {
-		c = (uchar)fmt_cstr[fmt_pos++];
-
+	eb = buf+n-1;
+	while(nc--) {
+		c = isr ? s1->Srune[sip] : s1->Sascii[sip];
+		sip++;
 		if(c != '%') {
 			if(b < eb) {
 				if(c < Runeself)
@@ -146,18 +57,14 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 			}
 			continue;
 		}
-
-		/* Start of format specifier */
 		f = fmt;
 		*f++ = c;
 		isbig = 0;
-
-		/* Parse the format specifier */
-		while(fmt_cstr[fmt_pos] != '\0') {
-			c = (uchar)fmt_cstr[fmt_pos++];
+		while(nc--) {
+			c = isr ? s1->Srune[sip] : s1->Sascii[sip];
+			sip++;
 			*f++ = c;
 			*f = '\0';
-
 			switch(c) {
 			default:
 				continue;
@@ -181,19 +88,26 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 			case 's':
 				ss = *(String**)va;
 				va += IBY2WD;
-				/* Validate String pointer BEFORE accessing */
-				if(ss == H || (uintptr_t)ss < 0x1000 || (uintptr_t)ss > 0x7ffffffffffULL) {
-					p = "(null)";
-				} else {
-					p = safe_string2c(ss);
+				if(ss == H)
+					p = "";
+				else
+				if(ss->len < 0) {
+					f[-1] += 'A'-'a';
+					ss->Srune[-ss->len] = L'\0';
+					p = ss->Srune;
+				}
+				else {
+					ss->Sascii[ss->len] = '\0';
+					p = ss->Sascii;
 				}
 				b += snprint(b, eb-b, fmt, p);
 				break;
 			case 'E':
 				f--;
-				r = 0x00c9;
-				f += runetochar(f, &r);
+				r = 0x00c9;	/* L'É' */
+				f += runetochar(f, &r);	/* avoid clash with ether address */
 				*f = '\0';
+				/* fall through */
 			case 'e':
 			case 'f':
 			case 'g':
@@ -218,6 +132,7 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 				}
 				else {
 					i = *(WORD*)va;
+					/* always a unicode character */
 					if(c == 'c')
 						f[-1] = 'C';
 					b += snprint(b, eb-b, fmt, i);
@@ -227,6 +142,7 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 			case 'r':
 				b = syserr(b, eb, xp);
 				break;
+/* Debugging formats - may disappear */
 			case 'H':
 				ptr = *(ulong**)va;
 				c = -1;
@@ -242,10 +158,6 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 			break;
 		}
 	}
-
-	if(b < eb)
-		*b = '\0';
-
 	return b - buf;
 }
 
@@ -487,8 +399,6 @@ builtinmod(char *name, void *vr, int rlen)
 	Module *m;
 	Link *l;
 
-	print("builtinmod: registering '%s', rlen=%d\n", name, rlen);
-
 	m = newmod(name);
 	if(rlen == 0){
 		while(r->name){
@@ -500,7 +410,6 @@ builtinmod(char *name, void *vr, int rlen)
 	l = m->ext = (Link*)malloc((rlen+1)*sizeof(Link));
 	if(l == nil){
 		freemod(m);
-		print("builtinmod ERROR: malloc failed for '%s'\n", name);
 		return nil;
 	}
 	while(r->name) {
@@ -510,7 +419,6 @@ builtinmod(char *name, void *vr, int rlen)
 		l++;
 	}
 	l->name = nil;
-	print("builtinmod: '%s' registered at m=%p, m->path='%s'\n", name, m, m->path);
 	return m;
 }
 
@@ -586,12 +494,3 @@ utfnleng(char *s, int nb, int *ngood)
 		*ngood = s-starts;
 	return n;
 }
-// FORCE REBUILD Thu Feb  5 11:49:03 PM -03 2026
-/* FORCE REBUILD Fri Feb  6 01:16:00 AM -03 2026 */
-// FORCE REBUILD xprint heap buffer fix - Thu Feb  6 02:00:00 AM -03 2026
-// FORCE REBUILD byte-by-byte copy - Fri Feb  6 02:10:00 AM -03 2026
-// FORCE REBUILD SIGSEGV handler - Fri Feb  6 02:20:00 AM -03 2026
-// FORCE REBUILD simplified memmove - Fri Feb  6 02:30:00 AM -03 2026
-// FORCE REBUILD safest empty string - Fri Feb  6 02:40:00 AM -03 2026
-// FORCE REBUILD no string access - Fri Feb  6 02:50:00 AM -03 2026
-// FORCE REBUILD s1 bounds check - Fri Feb  6 03:00:00 AM -03 2026

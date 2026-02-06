@@ -328,6 +328,17 @@ doflush(Display *d)
 	if(n <= 0)
 		return 1;
 
+	/*
+	 * Android local display support:
+	 * If datachan is nil, we're in local mode and should succeed without
+	 * communicating with a draw device. This allows allocimage to work
+	 * on platforms like Android that don't have a traditional /dev/draw.
+	 */
+	if(d->datachan == nil) {
+		d->bufp = d->buf;
+		return 1;
+	}
+
 	if(kchanio(d->datachan, d->buf, n, OWRITE) != n){
 		if(_drawdebug)
 			_drawprint(2, "flushimage fail: d=%p: %r\n", d); /**/

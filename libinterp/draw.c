@@ -392,41 +392,15 @@ Display_allocate(void *fp)
 	R2R(r, display->image->r);
 	dd->drawdisplay.image = allocdrawimage(dd, r, display->image->chan, display->image, 0, 0);
 
-	/* Handle nil color images - use fallback to display->image */
-	if(display->white != nil) {
+	/* Only allocate color convenience images if they were successfully created
+	 * during initdisplay. On Android with local display mode, these may be nil. */
+	if(display->white != nil && display->black != nil &&
+	   display->opaque != nil && display->transparent != nil) {
 		R2R(r, display->white->r);
-		dd->drawdisplay.white = allocdrawimage(dd, r, display->white->chan, display->white, 1, 0);
-	} else {
-		/* Fallback: use display->image as white */
-		dd->drawdisplay.white = allocdrawimage(dd, r, display->image->chan, display->image, 1, 0);
-		print("Display_allocate: warning - white color not available, using image as fallback\n");
-	}
-
-	if(display->black != nil) {
-		R2R(r, display->black->r);
 		dd->drawdisplay.black = allocdrawimage(dd, r, display->black->chan, display->black, 1, 0);
-	} else {
-		/* Fallback: use display->image as black */
-		dd->drawdisplay.black = allocdrawimage(dd, r, display->image->chan, display->image, 1, 0);
-		print("Display_allocate: warning - black color not available, using image as fallback\n");
-	}
-
-	if(display->opaque != nil) {
-		R2R(r, display->opaque->r);
+		dd->drawdisplay.white = allocdrawimage(dd, r, display->white->chan, display->white, 1, 0);
 		dd->drawdisplay.opaque = allocdrawimage(dd, r, display->opaque->chan, display->opaque, 1, 0);
-	} else {
-		/* Fallback: reuse white as opaque */
-		dd->drawdisplay.opaque = dd->drawdisplay.white;
-		print("Display_allocate: warning - opaque color not available, using white as fallback\n");
-	}
-
-	if(display->transparent != nil) {
-		R2R(r, display->transparent->r);
 		dd->drawdisplay.transparent = allocdrawimage(dd, r, display->transparent->chan, display->transparent, 1, 0);
-	} else {
-		/* Fallback: reuse black as transparent */
-		dd->drawdisplay.transparent = dd->drawdisplay.black;
-		print("Display_allocate: warning - transparent color not available, using black as fallback\n");
 	}
 
 	/* don't call unlockdisplay because the qlock was left up by initdisplay */
@@ -1973,7 +1947,10 @@ mkdrawimage(Image *i, Draw_Screen *screen, Draw_Display *display, void *ref)
 {
 	Heap *h;
 	DImage *di;
-	Display *idisp;
+
+	/* Handle nil image - allocation failed, return H (Draw nil) */
+	if(i == nil)
+		return H;
 
 	h = heap(TImage);
 	if(h == H)
@@ -1989,13 +1966,6 @@ mkdrawimage(Image *i, Draw_Screen *screen, Draw_Display *display, void *ref)
 		D2H(display)->ref++;
 	di->refreshptr = ref;
 
-	/* SAFETY: Validate Image pointer before accessing any fields */
-	if(i == H || i == nil || (uintptr_t)i < 0x1000) {
-		/* Invalid Image pointer, return H instead of crashing */
-		di->dref = nil;
-		return &di->drawimage;
-	}
-
 	R2R(di->drawimage.r, i->r);
 	R2R(di->drawimage.clipr, i->clipr);
 	di->drawimage.chans.desc = i->chan;
@@ -2003,17 +1973,14 @@ mkdrawimage(Image *i, Draw_Screen *screen, Draw_Display *display, void *ref)
 	di->drawimage.repl = i->repl;
 	di->flush = 1;
 
-	/* SAFETY: Check i pointer and i->display before accessing limbo */
-	idisp = nil;
-	if(i != H && i != nil) {
-		idisp = i->display;
-	}
-	if(idisp != H && idisp != nil) {
-		di->dref = idisp->limbo;
+	/* Check if i->display is valid before accessing limbo */
+	if(i->display != nil) {
+		di->dref = i->display->limbo;
 		di->dref->ref++;
 	} else {
 		di->dref = nil;
 	}
+
 	return &di->drawimage;
 }
 

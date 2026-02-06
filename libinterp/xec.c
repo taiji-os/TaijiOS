@@ -289,30 +289,18 @@ OP(movp)
 {
 	Heap *h;
 	WORD *dv, *sv;
-	WORD **dest;
 
 	sv = P(s);
-
-	/* SAFETY CHECK: Skip if destination pointer is invalid */
-	if(R.d == H || (uintptr)R.d < 0x1000) {
-		/* Just return without doing anything - this prevents the crash */
-		return;
-	}
-
-	dv = P(d);
-	dest = (WORD**)R.d;
-
 	if(sv != H) {
 		h = D2H(sv);
-		if((uintptr)h < 0x1000) {
-			error(exNilref);
-		}
 		h->ref++;
 		Setmark(h);
 	}
-
-	*dest = sv;
-	destroy(dv);
+	dv = P(d);
+	P(d) = sv;
+	/* Only destroy if dv is a valid heap object (not H) */
+	if(dv != H)
+		destroy(dv);
 }
 OP(movmp)
 {
@@ -797,8 +785,6 @@ OP(iload)
 		error("obsolete dis");
 	}
 
-	print("iload: module='%s', ldt_index=%zd\n", n, W(m));
-
 	DBG("\t\tiload module %s for the ldt index %zd\n", n, W(m));
 	if(strcmp(n, "$self") == 0) {
 		m->ref++;
@@ -808,27 +794,14 @@ OP(iload)
 			h = D2H(ml->MP);
 			h->ref++;
 			Setmark(h);
-			print("iload: $self module loaded, ml=%p\n", ml);
-		} else {
-			print("iload: $self module link failed, ml=H\n");
 		}
 	}
 	else {
-		print("iload: calling lookmod('%s')\n", n);
-		Module *lm = lookmod(n);
-		print("iload: lookmod returned m=%p\n", lm);
-		m = readmod(n, lm, 1);
-		print("iload: readmod returned m=%p\n", m);
-		if(m != nil)
-			ml = linkmod(m, ldt, 1);
-		else
-			ml = H;  /* Use H (-1) for nil, not 0 */
-		print("iload: linkmod returned ml=%p\n", ml);
+		m = readmod(n, lookmod(n), 1);
+		ml = linkmod(m, ldt, 1);
 	}
-	if(ml == H)
-		print("iload ERROR: module %s not loaded ml == H\n", n);
-	else
-		print("iload: module %s loaded successfully\n", n);
+	if(ml == nil)
+		print("iload module %s not loaded ml == nil\n", n);
 	mp = R.d;
 	t = *mp;
 	*mp = ml;
