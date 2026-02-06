@@ -31,7 +31,7 @@ jobs:
             Linux/amd64
             dis
             module
-          key: ${{ runner.os }}-taijios-${{ hashFiles('mkfile', 'mkconfig', '**/*.mkfile', '**/mkfile') }}
+          key: ${{ runner.os }}-taijios-${{ hashFiles('mkfile', 'mkconfig', '**/*.mkfile', '**/mkfile', 'module/*.m') }}
           restore-keys: |
             ${{ runner.os }}-taijios-
 

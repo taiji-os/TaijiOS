@@ -52,5 +52,11 @@ extern	void	kwerrstr(char *, ...);
 extern	void	kgerrstr(char*, uint);
 extern	long	kchanio(void*, void*, int, int);
 
+/* Functions from lib9 that are used by libinterp */
+extern	int	enc64(char*, int, uchar*, int);
+extern	int	dec64(uchar*, int, char*, int);
+extern	int	enc16(char*, int, uchar*, int);
+extern	int	getfields(char*, char**, int, int, char*);
+
 /* Android-specific file system initialization */
 extern	void	android_fs_init(const char*, const char*);

@@ -23,11 +23,13 @@ set(LIBDRAW ${TAIJIOS_ROOT}/libdraw)
 set(LIBMEMDRAW ${TAIJIOS_ROOT}/libmemdraw)
 set(LIBTK ${TAIJIOS_ROOT}/libtk)
 set(LIBSEC ${TAIJIOS_ROOT}/libsec)
+set(LIBMP ${TAIJIOS_ROOT}/libmp)
 
 # Include directories - order matters!
 include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}
 	${EMU_PORT}
+	${EMU_ANDROID}
 	${INCLUDE}
 	${LIB9}
 	${LIBINTERP}
@@ -35,6 +37,7 @@ include_directories(
 	${LIBMEMDRAW}
 	${LIBTK}
 	${LIBSEC}
+	${LIBMP}
 	${TAIJIOS_ROOT}/Android/arm64/include
 )
 
@@ -148,6 +151,8 @@ set(LIB9_SOURCES
 	${LIB9}/vsnprint.c
 	${LIB9}/smprint.c
 	${LIB9}/vsmprint.c
+	${LIB9}/u64.c
+	${LIB9}/u16.c
 )
 
 # Android-specific source files (common to all architectures)
@@ -230,12 +235,43 @@ list(FILTER LIBTK_SOURCES EXCLUDE REGEX ".*tkx11.*")
 list(FILTER LIBTK_SOURCES EXCLUDE REGEX ".*x11.*")
 # libtk/utils.c is now included - pool allocator fixes applied
 
-# libsec source files
+# libsec source files - only include what's needed for basic crypto
 file(GLOB_RECURSE LIBSEC_SOURCES
 	"${LIBSEC}/*.c"
 )
-list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*port/.*")
+# Include port/*.c - that's where the real implementations are!
+# Only exclude os.c (platform-specific), test files, and incompatible files
 list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*os\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*test\\.c")
+# Exclude files with compatibility issues
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*tlshand\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*x509\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha256block\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha512block\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha2block128\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha2block64\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*aesXCBmac\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha2\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha2_64\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*sha2_128\\.c")
+# Exclude files that require mpnrand and other complex functions
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*dh\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*ecc\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*curve25519.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*eg.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*dsa.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*rsa.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*tls.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*X509.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*pbkdf2.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*scrypt.*\\.c")
+list(FILTER LIBSEC_SOURCES EXCLUDE REGEX ".*hkdf.*\\.c")
+
+# libmp source files (multi-precision integers)
+file(GLOB_RECURSE LIBMP_SOURCES
+	"${LIBMP}/*.c"
+)
+list(FILTER LIBMP_SOURCES EXCLUDE REGEX ".*test\\.c")
 
 # libmemdraw/alloc.c has graphics-specific alloc functions, keep it
 # libdraw/alloc.c also has graphics-specific functions, keep it
@@ -251,6 +287,7 @@ set(TAIJIOS_SOURCES
 	${LIBMEMDRAW_SOURCES}
 	${LIBTK_SOURCES}
 	${LIBSEC_SOURCES}
+	${LIBMP_SOURCES}
 )
 
 # Build the shared library

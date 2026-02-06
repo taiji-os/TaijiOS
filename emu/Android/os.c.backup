@@ -4,7 +4,6 @@
  */
 
 #include <sys/types.h>
-#include <fcntl.h>
 #include <time.h>
 #include <signal.h>
 #include <unistd.h>
@@ -34,8 +33,6 @@
 #include <kernel.h>
 #include <draw.h>
 #include "../libinterp/runt.h"
-#include <mp.h>
-#include <libsec.h>
 
 /* Forward declarations */
 typedef struct Memimage Memimage;
@@ -315,6 +312,19 @@ emuinit(void *imod)
 	USED(imod);
 	LOGI("emuinit: ENTRY - TaijiOS emulator starting");
 
+	/* Create wmcontext for /dev/wmctx-* devices */
+	extern void* wmcontext_create(void*);
+	extern void wmcontext_set_active(void*);
+	LOGE("emuinit: *** ABOUT TO CREATE WMCONTEXT ***");
+	void* wm = wmcontext_create(nil);
+	LOGE("emuinit: *** WMCONTEXT CREATE RETURNED %p ***", wm);
+	if(wm != nil) {
+		wmcontext_set_active(wm);
+		LOGE("emuinit: *** CREATED WMCONTEXT %p ***", wm);
+	} else {
+		LOGE("emuinit: *** FAILED TO CREATE WMCONTEXT ***");
+	}
+
 	/* Initialize operators for Dis VM */
 	opinit();
 	excinit();
@@ -325,13 +335,13 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Try clock first - user requested to test it */
+	/* Try clock first - we've confirmed VM works with testprint */
 	static const char* test_modules[] = {
-		"dis/clock.dis",       /* Clock application - user requested */
-		"dis/testsimple.dis",  /* Has Sys_print calls that log to Android */
-		"dis/testload.dis",    /* Minimal Draw module test */
-		"dis/minimal.dis",     /* GUI test with button */
+		"dis/clock.dis",       /* Clock application - complex Tk */
 		"dis/testprint.dis",
+		"dis/testsimple.dis",
+		"dis/minimal.dis",     /* GUI test with button */
+		"dis/testload.dis",
 		"dis/testnobox.dis",
 		"dis/testsleep.dis",
 		"dis/testwm.dis",
@@ -774,9 +784,93 @@ crecv(Channel *c, void *v)
 	USED(v);
 }
 
-/* DES encryption (setupDESstate), Base64 encoding (enc64, dec64),
- * setupRC4state, setupIDEAstate, block_cipher, des_ecb_cipher,
- * des_cipher, idea_cipher, rc4 are now provided by libsec */
+/* DES encryption - stub */
+void
+setupDESstate(DESstate *s, uchar *key, int nkey)
+{
+	USED(s);
+	USED(key);
+	USED(nkey);
+}
+
+/* Base64 encoding - stub */
+int
+enc64(char *out, int len, uchar *in, int n)
+{
+	USED(out);
+	USED(len);
+	USED(in);
+	USED(n);
+	return 0;
+}
+
+int
+dec64(uchar *out, int len, char *in, int n)
+{
+	USED(out);
+	USED(len);
+	USED(in);
+	USED(n);
+	return 0;
+}
+
+/* More crypto functions - stub */
+void
+setupRC4state(RC4state *s, uchar *key, int nkey)
+{
+	USED(s);
+	USED(key);
+	USED(nkey);
+}
+
+void
+setupIDEAstate(IDEAstate *s, uchar *key, int nkey)
+{
+	USED(s);
+	USED(key);
+	USED(nkey);
+}
+
+int
+block_cipher(uchar *p, int len)
+{
+	USED(p);
+	USED(len);
+	return 0;
+}
+
+void
+des_ecb_cipher(uchar *in, uchar *out, int len)
+{
+	USED(in);
+	USED(out);
+	USED(len);
+}
+
+void
+des_cipher(uchar *in, uchar *out, int len)
+{
+	USED(in);
+	USED(out);
+	USED(len);
+}
+
+void
+idea_cipher(uchar *in, uchar *out, int len)
+{
+	USED(in);
+	USED(out);
+	USED(len);
+}
+
+void
+rc4(RC4state *s, uchar *in, uchar *out, int len)
+{
+	USED(s);
+	USED(in);
+	USED(out);
+	USED(len);
+}
 
 Chan*
 fdtochan(Fgrp *f, int fd, int mode, int is_dup, int head)
@@ -789,7 +883,38 @@ fdtochan(Fgrp *f, int fd, int mode, int is_dup, int head)
 	return nil;
 }
 
-/* SHA1, MD5, MD4 hash functions are now provided by libsec */
+/* SHA1 hash - stub */
+DigestState*
+sha1(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
+
+DigestState*
+md5(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
+
+/* closefgrp, closepgrp, closeegrp are in emu/port/pgrp.c */
+
+DigestState*
+md4(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
 
 /* Process list - global variable */
 Procs procs;
@@ -942,42 +1067,41 @@ _fmtFdFlush(Fmt *f)
 	USED(f);
 }
 
-/* AES encryption (aesCBCencrypt, setupAESstate) is now provided by libsec */
-
-/* Multi-precision integer functions are now provided by libmp */
-
-/*
- * genrandom - Generate random bytes for libmp/libsec
- * This is used by mprand() and various crypto functions
- */
+/* AES encryption - stub */
 void
-genrandom(uchar *p, int n)
+aesCBCencrypt(uchar *data, int len, uchar *key, int keylen, uchar *iv)
 {
-	int fd;
-
-	fd = open("/dev/urandom", O_RDONLY);
-	if(fd >= 0) {
-		read(fd, p, n);
-		close(fd);
-	} else {
-		/* Fallback: use clock_gettime for pseudo-random */
-		for(int i = 0; i < n; i++) {
-			p[i] = (uvlong)osfastticks() & 0xFF;
-		}
-	}
+	USED(data);
+	USED(len);
+	USED(key);
+	USED(keylen);
+	USED(iv);
 }
 
-/*
- * truerand - Generate true random number for libsec
- * Uses genrandom() as the underlying source
- */
-ulong
-truerand(void)
+void
+setupAESstate(AESstate *s, uchar *key, int keylen, uchar *iv)
 {
-	ulong x;
+	USED(s);
+	USED(key);
+	USED(keylen);
+	USED(iv);
+}
 
-	genrandom((uchar*)&x, sizeof(x));
-	return x;
+/* Blowfish state setup - stub */
+void
+setupBFstate(BFstate *s, uchar *key, int keylen)
+{
+	USED(s);
+	USED(key);
+	USED(keylen);
+}
+
+/* Multi-precision integer stub */
+mpint*
+mpnew(int n)
+{
+	USED(n);
+	return nil;
 }
 
 /* DSA primes - stub */
@@ -988,15 +1112,118 @@ mpint *DSAprimes[1] = {nil};
 /* bflag - debug flag */
 int bflag = 0;
 
-/* gensafeprime, mpsignif are now provided by libsec/libmp */
+/* gensafeprime - generate safe prime */
+mpint*
+gensafeprime(mpint *p, int n)
+{
+	USED(p);
+	USED(n);
+	return nil;
+}
 
-/* HMAC functions (hmac_md5, hmac_sha1) are now provided by libsec */
+/* MP signature - stub */
+int
+mpsignif(mpint *m, mpint *n, mpint *key, mpint *sig)
+{
+	USED(m);
+	USED(n);
+	USED(key);
+	USED(sig);
+	return 0;
+}
 
-/* RSA decrypt, encrypt, fill are now provided by libsec */
+/* HMAC functions - stub */
+DigestState*
+hmac_md5(uchar *data, ulong dlen, uchar *key, ulong klen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(key);
+	USED(klen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
 
-/* RC4 skip, aesCBCdecrypt are now provided by libsec */
+DigestState*
+hmac_sha1(uchar *data, ulong dlen, uchar *key, ulong klen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(key);
+	USED(klen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
 
-/* Blowfish encryption (bfCBCencrypt, bfCBCdecrypt) is now provided by libsec */
+/* RSA decrypt - stub */
+mpint*
+rsadecrypt(mpint *cipher, mpint *modulus, mpint *exponent)
+{
+	USED(cipher);
+	USED(modulus);
+	USED(exponent);
+	return nil;
+}
+
+/* RSA encrypt - stub */
+mpint*
+rsaencrypt(mpint *plain, mpint *modulus, mpint *exponent)
+{
+	USED(plain);
+	USED(modulus);
+	USED(exponent);
+	return nil;
+}
+
+/* RSA fill - stub */
+void
+rsafill(mpint *m, mpint *n, mpint *e)
+{
+	USED(m);
+	USED(n);
+	USED(e);
+}
+
+/* RC4 skip - stub */
+void
+rc4skip(RC4state *s, ulong n)
+{
+	USED(s);
+	USED(n);
+}
+
+void
+aesCBCdecrypt(uchar *data, int len, uchar *key, int keylen, uchar *iv)
+{
+	USED(data);
+	USED(len);
+	USED(key);
+	USED(keylen);
+	USED(iv);
+}
+
+/* Blowfish encryption - stub */
+void
+bfCBCencrypt(uchar *data, int len, uchar *key, int keylen, uchar *iv)
+{
+	USED(data);
+	USED(len);
+	USED(key);
+	USED(keylen);
+	USED(iv);
+}
+
+void
+bfCBCdecrypt(uchar *data, int len, uchar *key, int keylen, uchar *iv)
+{
+	USED(data);
+	USED(len);
+	USED(key);
+	USED(keylen);
+	USED(iv);
+}
 
 /*
  * Additional runtime functions needed by the emu layer
@@ -1060,9 +1287,65 @@ int gkscanid = 0;
 
 /* currun() function is in emu/port/dis.c */
 
-/* RC4 backward (rc4back), RSA private key free (rsaprivfree) are now provided by libsec */
+/* RC4 backward - move RC4 state backward */
+void
+rc4back(RC4state *s, ulong n)
+{
+	USED(s);
+	USED(n);
+}
 
-/* SHA2 hash functions (sha2_224, sha2_256, sha2_384, sha2_512) are now provided by libsec */
+/* RSA private key free */
+typedef struct RSApriv RSApriv;
+void
+rsaprivfree(RSApriv *r)
+{
+	USED(r);
+}
+
+/* SHA2-224 hash */
+DigestState*
+sha2_224(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
+
+/* SHA2-256 hash */
+DigestState*
+sha2_256(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
+
+/* SHA2-384 hash */
+DigestState*
+sha2_384(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
+
+/* SHA2-512 hash */
+DigestState*
+sha2_512(uchar *data, ulong dlen, uchar *digest, DigestState *s)
+{
+	USED(data);
+	USED(dlen);
+	USED(digest);
+	USED(s);
+	return nil;
+}
 
 /* Error function - sets error string and jumps to error handler */
 void
@@ -1099,11 +1382,92 @@ nexterror(void)
 /* Process exit */
 /* pexit is defined in kproc-pthreads.c */
 
-/* Additional crypto functions - DSA, EG, RSA are now provided by libsec */
+/* Additional crypto functions - DSA */
+typedef struct DSApub DSApub;
+typedef struct DSApriv DSApriv;
+typedef struct EGpub EGpub;
+typedef struct EGpriv EGpriv;
 
-/* Multi-precision copy, free, div are now provided by libmp */
+DSApub*
+dsaverify(DSApub *key, mpint *hash, mpint *sig)
+{
+	USED(key);
+	USED(hash);
+	USED(sig);
+	return nil;
+}
 
-/* Elliptic curve verify (egverify) is now provided by libsec */
+DSApriv*
+dsagen(DSApub *pub, mpint *exp)
+{
+	USED(pub);
+	USED(exp);
+	return nil;
+}
+
+void
+dsaprivfree(DSApriv *dsa)
+{
+	USED(dsa);
+}
+
+/* Elliptic curve crypto */
+EGpriv*
+eggen(EGpub *pub, mpint *exp)
+{
+	USED(pub);
+	USED(exp);
+	return nil;
+}
+
+void
+egprivfree(EGpriv *eg)
+{
+	USED(eg);
+}
+
+/* RSA generate */
+RSApriv*
+rsagen(int nlen, int eplen, mpint *e)
+{
+	USED(nlen);
+	USED(eplen);
+	USED(e);
+	return nil;
+}
+
+/* Multi-precision copy */
+mpint*
+mpcopy(mpint *x)
+{
+	USED(x);
+	return nil;
+}
+
+void
+mpfree(mpint *x)
+{
+	USED(x);
+}
+
+mpint*
+mpdiv(mpint *a, mpint *b, mpint *r)
+{
+	USED(a);
+	USED(b);
+	USED(r);
+	return nil;
+}
+
+/* Elliptic curve verify */
+EGpub*
+egverify(EGpub *key, mpint *hash, mpint *sig)
+{
+	USED(key);
+	USED(hash);
+	USED(sig);
+	return nil;
+}
 
 /* kwerrstr is in emu/port/errstr.c */
 
@@ -1195,63 +1559,230 @@ int TDigestState = 10;
 int TSK = 11;
 int TPK = 12;
 
-/* Multi-precision functions (add, and, betomp, exp, genprime, genstrongprime,
- * itomp, mpinvert, mptoa, mptobe, mptoi, mod, mul, not, or, probably_prime,
- * mprand, mpleft, xor, cmp, strtomp) are now provided by libmp */
-
-/* Kernel file operations - stub implementations */
-int
-kopen(char *path, int mode)
+/* More multi-precision functions */
+mpint*
+mpadd(mpint *a, mpint *b)
 {
-	USED(path);
-	USED(mode);
-	return -1;
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+mpint*
+mpand(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+mpint*
+betomp(uchar *p, int n, mpint *b)
+{
+	USED(p);
+	USED(n);
+	return nil;
+}
+
+mpint*
+mpexp(mpint *base, mpint *exp, mpint *mod)
+{
+	USED(base);
+	USED(exp);
+	USED(mod);
+	return nil;
+}
+
+mpint*
+genprime(int n, int accuracy)
+{
+	USED(n);
+	USED(accuracy);
+	return nil;
+}
+
+mpint*
+genstrongprime(int n)
+{
+	USED(n);
+	return nil;
+}
+
+mpint*
+itomp(int i, mpint *b)
+{
+	USED(i);
+	return nil;
+}
+
+mpint*
+mpinvert(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+char*
+mptoa(mpint *n, int base, char *buf, int len)
+{
+	USED(n);
+	USED(base);
+	USED(buf);
+	USED(len);
+	return "";
 }
 
 int
-kclose(int fd)
+mptobe(mpint *n, uchar *p, int len, int skip)
 {
-	USED(fd);
-	return -1;
+	USED(n);
+	USED(p);
+	USED(len);
+	USED(skip);
+	return 0;
 }
 
 int
-kcreate(char *path, int mode, ulong perm)
+mptoi(mpint *n)
 {
-	USED(path);
-	USED(mode);
-	USED(perm);
-	return -1;
+	USED(n);
+	return 0;
 }
 
-/* Hex encoding (enc16) is now provided by lib9 */
+mpint*
+mpmod(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+mpint*
+mpmul(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+mpint*
+mpnot(mpint *a)
+{
+	USED(a);
+	return nil;
+}
+
+mpint*
+mpor(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+int
+probably_prime(mpint *n, int nrep)
+{
+	USED(n);
+	USED(nrep);
+	return 0;
+}
+
+mpint*
+mprand(int bits, int (*gen)(int), int seed)
+{
+	USED(bits);
+	USED(gen);
+	USED(seed);
+	return nil;
+}
+
+mpint*
+mpleft(mpint *a, int shift)
+{
+	USED(a);
+	USED(shift);
+	return nil;
+}
+
+mpint*
+mpxor(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+int
+mpcmp(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return 0;
+}
+
+mpint*
+strtomp(char *str, char **end, int base, mpint *b)
+{
+	USED(str);
+	USED(end);
+	USED(base);
+	return nil;
+}
+
+/* Kernel file operations - see devfs.c for implementations */
+
+/* Hex encoding */
+int
+enc16(char *out, int len, uchar *in, int n)
+{
+	USED(out);
+	USED(len);
+	USED(in);
+	USED(n);
+	return 0;
+}
 
 /* Pool memory region functions */
 /* poolimmutable and poolmutable are defined in emu/port/alloc.c */
 
-/* Kernel write */
-s32
-kwrite(int fd, void *buf, s32 len)
+/* Kernel write - see devfs.c for implementation */
+
+/* Crypto module initialization */
+void
+elgamalinit(void)
 {
-	USED(fd);
-	USED(buf);
-	USED(len);
-	return -1;
 }
 
-/* Crypto module initialization (elgamalinit, rsainit, dsainit) is now provided by libsec */
-
-/* More mp functions (mpright, mpsub) are now provided by libmp */
-
-/* Kernel read */
-s32
-kread(int fd, void *buf, s32 len)
+void
+rsainit(void)
 {
-	USED(fd);
-	USED(buf);
-	USED(len);
-	return -1;
 }
+
+void
+dsainit(void)
+{
+}
+
+/* More mp functions */
+mpint*
+mpright(mpint *a, int shift)
+{
+	USED(a);
+	USED(shift);
+	return nil;
+}
+
+mpint*
+mpsub(mpint *a, mpint *b)
+{
+	USED(a);
+	USED(b);
+	return nil;
+}
+
+/* Kernel read - see devfs.c for implementation */
 
 /* Dynamic module linking */
 void
@@ -1525,13 +2056,7 @@ gfltconv(Fmt *f)
 	return '%g';
 }
 
-/* Kernel file stat */
-Dir*
-kdirfstat(int fd)
-{
-	USED(fd);
-	return nil;
-}
+/* Kernel file stat - see devfs.c for implementation */
 
 /* Check if file is dynamically loadable */
 int
@@ -1541,15 +2066,7 @@ dynldable(int fd)
 	return 0;
 }
 
-/* Kernel seek */
-vlong
-kseek(int fd, vlong offset, int whence)
-{
-	USED(fd);
-	USED(offset);
-	USED(whence);
-	return -1;
-}
+/* Kernel seek - see devfs.c for implementation */
 
 /* New dynamic code */
 Module*
@@ -2580,9 +3097,37 @@ void* sbrk(intptr_t increment)
 	return result;
 }
 
-/* EG sign functions (egsign, egsigfree) are now provided by libsec */
+/* EG sign functions */
+void*
+egsign(EGpub *key, mpint *m, mpint *a)
+{
+	USED(key);
+	USED(m);
+	USED(a);
+	return nil;
+}
 
-/* DSA sign functions (dsasign, dsasigfree) are now provided by libsec */
+void
+egsigfree(void *sig)
+{
+	USED(sig);
+}
+
+/* DSA sign functions */
+void*
+dsasign(DSApub *key, mpint *m, mpint *a)
+{
+	USED(key);
+	USED(m);
+	USED(a);
+	return nil;
+}
+
+void
+dsasigfree(void *sig)
+{
+	USED(sig);
+}
 
 /* Device tables - extern declarations */
 extern Dev envdevtab;
@@ -2612,6 +3157,22 @@ init_android_display(void)
 		if(_display) {
 			LOGI("init_android_display: Display initialized at %p", _display);
 			LOGI("init_android_display: Graphics working - waiting for Dis module to draw");
+			__android_log_print(ANDROID_LOG_INFO, "WM_INIT", "=== STEP 1: About to create wmcontext ===");
+
+			/* Create wmcontext for /dev/wmctx-* devices */
+			extern void* wmcontext_create(void*);
+			void* wm = wmcontext_create(nil);
+			__android_log_print(ANDROID_LOG_INFO, "WM_INIT", "=== STEP 2: wmcontext_create returned %p ===", wm);
+
+			if(wm != nil) {
+				extern void wmcontext_set_active(void*);
+				wmcontext_set_active(wm);
+				__android_log_print(ANDROID_LOG_INFO, "WM_INIT", "=== STEP 3: Set wmcontext active ===");
+				LOGI("init_android_display: Created wmcontext %p", wm);
+			} else {
+				__android_log_print(ANDROID_LOG_ERROR, "WM_INIT", "=== STEP 3: FAILED ===");
+				LOGE("init_android_display: Failed to create wmcontext");
+			}
 		} else {
 			LOGE("init_android_display: Failed to initialize display");
 		}
@@ -2632,6 +3193,7 @@ void
 libinit(char *imod)
 {
 	LOGI("libinit: ENTRY - imod=%s", imod ? imod : "NULL");
+	LOGI("libinit: XXX TEST RAW LOG");
 	Proc *p;
 	typedef struct Osdep Osdep;
 	struct Osdep {
@@ -2678,9 +3240,11 @@ libinit(char *imod)
 	 * This fixes a race condition where Dis VM code (e.g., minimal.dis)
 	 * tries to call GUI functions (tkclient->init(), tkclient->toplevel())
 	 * before the display is ready, causing SIGSEGV crashes.
+	 * Note: init_android_display() also creates the wmcontext.
 	 */
 	init_android_display();
 
+	LOGI("libinit: AFTER init_android_display, before emuinit");
 	LOGI("libinit: Calling emuinit");
 	emuinit((void*)imod);  /* emuinit takes void* per fns.h */
 
@@ -2780,18 +3344,8 @@ seekdir(DIR *dirp, long loc)
 
 /*
  * Android filesystem initialization
- * Stub implementation for android_main.c compatibility
+ * Real implementation is in devfs.c
  */
-void
-android_fs_init(const char* internal_path, const char* external_path)
-{
-	USED(internal_path);
-	USED(external_path);
-	/* Paths will be handled by the existing devfs-posix.c implementation */
-	LOGI("android_fs_init: internal=%s external=%s",
-	     internal_path ? internal_path : "nil",
-	     external_path ? external_path : "nil");
-}
 
 /*
  * Load Dis bytecode from Android assets
