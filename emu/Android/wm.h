@@ -35,6 +35,9 @@ struct Wmcontext {
 	/* Associated draw context */
 	void*	drawctxt;		/* Draw_Context pointer (opaque) */
 
+	/* Window management for Android */
+	void*	windows;		/* WmWindow* - linked list of registered windows */
+
 	/* State */
 	int		refcount;		/* Reference count */
 	int		closed;			/* Whether context is closed */
@@ -52,6 +55,22 @@ struct WmPointer {
 	int		x;				/* X coordinate */
 	int		y;				/* Y coordinate */
 	int		msec;			/* Timestamp in milliseconds */
+};
+
+/*
+ * WmWindow - Registered client window
+ * Represents a wmclient window that should be composited to screen
+ */
+typedef struct WmWindow WmWindow;
+
+struct WmWindow {
+	Rectangle		r;			/* Window position and size on screen */
+	Memimage*		image;		/* Window's drawing surface (from wmclient) */
+	Memimage*		screenimg;	/* Screen image this window belongs to */
+	int				visible;	/* Visibility flag */
+	int				zorder;		/* Stacking order (higher = on top) */
+	ulong			id;			/* Window ID for tracking */
+	WmWindow*		next;		/* Next window in list */
 };
 
 /*
@@ -164,5 +183,45 @@ int		wmcontext_update_display(Wmcontext* wm);
 /* Update display from active wmcontext */
 /* Convenience function for main loop */
 int		wm_update_active_display(void);
+
+/*
+ * Window Management Functions
+ * Register and composite wmclient windows to screen
+ */
+
+/* Register a wmclient window with the wmcontext */
+/* Called when wmclient creates a new window */
+/* Returns window ID on success, -1 on failure */
+int		wmcontext_register_window(Wmcontext* wm, Memimage* winimg, Rectangle r);
+
+/* Unregister a window from the wmcontext */
+void		wmcontext_unregister_window(Wmcontext* wm, int winid);
+
+/* Mark a window region as dirty (needs redraw) */
+/* Called when application draws to its window */
+void		wmcontext_mark_dirty(Wmcontext* wm, int winid, Rectangle r);
+
+/* Composite all visible windows to screenimage */
+/* Called from flushmemscreen() before rendering */
+void		wmcontext_composite_windows(Wmcontext* wm);
+
+/* Get screenimage for compositing */
+/* Returns the global screenimage from devdraw.c */
+Memimage*	wmcontext_get_screenimage(void);
+
+/* Flush screen after compositing */
+/* Triggers flushmemscreen() with the composited region */
+void		wmcontext_flush_screen(Rectangle r);
+
+/*
+ * Called by devdraw.c when a wmclient window (layer) is created
+ * This allows the Android WM to track wmclient windows for compositing
+ */
+void		wmcontext_notify_window_created(Memimage* layerimg, Rectangle screenr);
+
+/*
+ * Called by devdraw.c when a wmclient window is destroyed
+ */
+void		wmcontext_notify_window_destroyed(Memimage* layerimg);
 
 #endif /* WM_H */

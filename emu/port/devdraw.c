@@ -8,6 +8,19 @@
 #include	<cursor.h>
 //#include	"screen.h"
 
+/*
+ * Android-specific window management hooks
+ * Defined in emu/Android/wm.c
+ * Weak symbols so other platforms don't need to implement them
+ */
+#if defined(__ANDROID__)
+extern void wmcontext_notify_window_created(Memimage* layerimg, Rectangle screenr);
+extern void wmcontext_notify_window_destroyed(Memimage* layerimg);
+#else
+static void wmcontext_notify_window_created(Memimage* layerimg, Rectangle screenr) { (void)layerimg; (void)screenr; }
+static void wmcontext_notify_window_destroyed(Memimage* layerimg) { (void)layerimg; }
+#endif
+
 enum
 {
 	Qtopdir		= 0,
@@ -369,8 +382,11 @@ addflush(Rectangle r)
 		return;
 	}
 	/* emit current state */
-	if(flushrect.min.x < flushrect.max.x)
+	if(flushrect.min.x < flushrect.max.x) {
+		iprint("devdraw: flushmemscreen rect=(%d,%d)-(%d,%d)\n",
+		       flushrect.min.x, flushrect.min.y, flushrect.max.x, flushrect.max.y);
 		flushmemscreen(flushrect);
+	}
 	flushrect = r;
 	waste = 0;
 }
@@ -643,6 +659,10 @@ drawfreedimage(DImage *dimage)
 		if(l->layer->refreshfn == drawrefresh)	/* else true owner will clean up */
 			free(l->layer->refreshptr);
 		l->layer->refreshptr = nil;
+
+		/* Notify Android WM that a wmclient window is being destroyed */
+		wmcontext_notify_window_destroyed(l);
+
 		if(drawgoodname(dimage))
 			memldelete(l);
 		else
@@ -856,7 +876,7 @@ drawchar(Memimage *dst, Point p, Memimage *src, Point *sp, DImage *font, int ind
 	return p;
 }
 
-static int
+int
 initscreenimage(void)
 {
 	int width, depth;
@@ -1401,6 +1421,11 @@ drawmesg(Client *client, void *av, int n)
 					error(Edrawmem);
 				}
 				dscrn->ref++;
+
+				/* Notify Android WM that a wmclient window was created */
+				/* This allows the WM to track and composite the window */
+				wmcontext_notify_window_created(l, l->layer->screenr);
+
 				if(reffn){
 					refx = nil;
 					if(reffn == drawrefresh){

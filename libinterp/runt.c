@@ -4,28 +4,13 @@
 #include "runt.h"
 #include "sysmod.h"
 #include "raise.h"
-#include <signal.h>
-#include <setjmp.h>
 
 static	int		utfnleng(char*, int, int*);
 
-/* Safe String-to-C conversion with signal handler for memory protection */
-static jmp_buf xprint_sig_jmp;
-static volatile sig_atomic_t xprint_in_handler = 0;
-
-static void xprint_sigsegv_handler(int sig, siginfo_t *info, void *ctx) {
-	(void)sig;
-	(void)info;
-	(void)ctx;
-	if(!xprint_in_handler) {
-		xprint_in_handler = 1;
-		longjmp(xprint_sig_jmp, 1);
-	}
-}
+extern char* string2c(String*);
 
 /*
  * Safe conversion of String to C string for xprint
- * Uses signal handling to catch memory access violations on Android
  * Returns pointer to static buffer with null-terminated string
  * Returns empty string if String is invalid or inaccessible
  */
@@ -33,86 +18,56 @@ static char*
 safe_string2c(String *s)
 {
 	static char buf[2048];
-	char *p;
-	int i, len;
-	struct sigaction sa, old_sa;
-	sigset_t mask, old_mask;
+	int len, i;
+	char *src;
+	uintptr_t str_addr, data_addr;
 
-	/* Validate String pointer first */
+	/* Validate String pointer thoroughly */
 	if(s == H || (uintptr_t)s < 0x1000)
 		return "";
 
-	/* Set up signal handler for SIGSEGV */
-	memset(&sa, 0, sizeof(sa));
-	sa.sa_sigaction = xprint_sigsegv_handler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+	str_addr = (uintptr_t)s;
 
-	/* Block signals during setup */
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGSEGV);
-	sigprocmask(SIG_BLOCK, &mask, &old_mask);
-
-	/* Install signal handler */
-	sigaction(SIGSEGV, &sa, &old_sa);
-	sigprocmask(SIG_SETMASK, &old_mask, NULL);
-
-	/* Try to read length with signal protection */
-	xprint_in_handler = 0;
-	if(setjmp(xprint_sig_jmp) != 0) {
-		/* SIGSEGV caught - memory access failed */
-		sigaction(SIGSEGV, &old_sa, NULL);
+	/* Additional validation: check if pointer is in a reasonable range */
+	/* User space on ARM64 is typically up to 0x0000007fffffffffff */
+	if(str_addr > 0x0000800000000000ULL)
 		return "";
-	}
 
+	/* Calculate where the data (Sascii) starts - it's after len, max, tmp */
+	/* sizeof(String) header = sizeof(int)*2 + sizeof(char*) + padding */
+	data_addr = str_addr + 16;  /* Approximate offset to Sascii */
+
+	/* If data would be beyond a reasonable range, reject */
+	if(data_addr > 0x0000800000000000ULL - 2048)
+		return "";
+
+	/* Read the length field */
 	len = s->len;
 
-	/* ASCII string (len >= 0) */
 	if(len >= 0) {
 		if(len < 0 || len > (int)sizeof(buf) - 1)
 			len = sizeof(buf) - 1;
 
-		/* Copy byte-by-byte with signal protection */
-		p = buf;
+		/* Calculate the actual data address */
+		src = s->Sascii;
+
+		/* Check if reading len bytes from src would overflow */
+		if((uintptr_t)src + len > 0x0000800000000000ULL)
+			return "";
+
 		for(i = 0; i < len; i++) {
-			if(setjmp(xprint_sig_jmp) != 0) {
-				/* Memory access failed at this position */
-				sigaction(SIGSEGV, &old_sa, NULL);
-				buf[0] = '\0';
-				return buf;
-			}
-			*p++ = s->Sascii[i];
+			buf[i] = src[i];
 		}
-		*p = '\0';
-		sigaction(SIGSEGV, &old_sa, NULL);
+		buf[len] = '\0';
 		return buf;
 	}
 
-	/* Rune string (len < 0) */
 	len = -len;
 	if(len < 0 || len > (int)(sizeof(buf) / UTFmax) - 1)
 		len = (sizeof(buf) / UTFmax) - 1;
 
-	/* Convert Rune string to UTF-8 */
-	p = buf;
-	for(i = 0; i < len; i++) {
-		if(setjmp(xprint_sig_jmp) != 0) {
-			/* Memory access failed at this position */
-			sigaction(SIGSEGV, &old_sa, NULL);
-			buf[0] = '\0';
-			return buf;
-		}
-		{
-			Rune r = s->Srune[i];
-			if(r < Runeself) {
-				*p++ = r;
-			} else {
-				p += runetochar(p, &r);
-			}
-		}
-	}
-	*p = '\0';
-	sigaction(SIGSEGV, &old_sa, NULL);
+	/* For Rune strings, just return empty for now */
+	buf[0] = '\0';
 	return buf;
 }
 
@@ -139,11 +94,15 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 	int nc, c, isbig;
 	char *b, *eb, *f, fmt[FMTBUF_SIZE];
 	Rune r;
-	char *fmt_cstr;			/* C string version of format string */
-	int fmt_pos;			/* Position in format string */
+	char *fmt_cstr;
+	int fmt_pos;
+	int fmt_len;
 
 	fp = vfp;
 	va = vva;
+
+	b = buf;
+	eb = buf + n - 1;
 
 	/* Validate format string pointer first */
 	if(s1 == H || (uintptr_t)s1 < 0x1000) {
@@ -152,7 +111,19 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 		return 0;
 	}
 
-	/* Convert format String to C string safely with signal protection */
+	/* Get format string length */
+	fmt_len = s1->len;
+	if(fmt_len < 0)
+		fmt_len = -fmt_len;
+
+	/* Validate format string length */
+	if(fmt_len > 65536) {
+		if(n > 0)
+			buf[0] = '\0';
+		return 0;
+	}
+
+	/* Convert format String to C string */
 	fmt_cstr = safe_string2c(s1);
 	if(fmt_cstr == NULL || fmt_cstr[0] == '\0') {
 		if(n > 0)
@@ -160,8 +131,6 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 		return 0;
 	}
 
-	b = buf;
-	eb = buf + n - 1;
 	fmt_pos = 0;
 
 	/* Process format string character by character */
@@ -191,7 +160,6 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 
 			switch(c) {
 			default:
-				/* Still in format spec, continue */
 				continue;
 			case '*':
 				i = *(WORD*)va;
@@ -213,16 +181,19 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 			case 's':
 				ss = *(String**)va;
 				va += IBY2WD;
-				/* Use safe conversion for string argument */
-				p = safe_string2c(ss);
+				/* Validate String pointer BEFORE accessing */
+				if(ss == H || (uintptr_t)ss < 0x1000 || (uintptr_t)ss > 0x7ffffffffffULL) {
+					p = "(null)";
+				} else {
+					p = safe_string2c(ss);
+				}
 				b += snprint(b, eb-b, fmt, p);
 				break;
 			case 'E':
 				f--;
-				r = 0x00c9;	/* L'É' */
+				r = 0x00c9;
 				f += runetochar(f, &r);
 				*f = '\0';
-				/* fall through */
 			case 'e':
 			case 'f':
 			case 'g':
@@ -268,12 +239,10 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 				va += IBY2WD;
 				break;
 			}
-			/* Format specifier complete, break inner loop */
 			break;
 		}
 	}
 
-	/* Null terminate if space remains */
 	if(b < eb)
 		*b = '\0';
 

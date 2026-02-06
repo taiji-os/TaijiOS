@@ -1,5 +1,8 @@
 #pragma src "/usr/inferno/libdraw"
 
+#ifndef _DRAW_H_
+#define _DRAW_H_
+
 #pragma	varargck	argpos	_drawprint	2
 
 typedef struct	Cachefont Cachefont;
@@ -568,3 +571,5 @@ extern	void	font_close(Font*);
 #define R2R(r1, r2)	(r1).min.x = (r2).min.x, (r1).min.y = (r2).min.y,\
 			(r1).max.x = (r2).max.x, (r1).max.y = (r2).max.y
 extern Image*	display_open(Display*, char*);
+
+#endif /* _DRAW_H_ */

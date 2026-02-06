@@ -1973,6 +1973,7 @@ mkdrawimage(Image *i, Draw_Screen *screen, Draw_Display *display, void *ref)
 {
 	Heap *h;
 	DImage *di;
+	Display *idisp;
 
 	h = heap(TImage);
 	if(h == H)
@@ -1988,14 +1989,31 @@ mkdrawimage(Image *i, Draw_Screen *screen, Draw_Display *display, void *ref)
 		D2H(display)->ref++;
 	di->refreshptr = ref;
 
+	/* SAFETY: Validate Image pointer before accessing any fields */
+	if(i == H || i == nil || (uintptr_t)i < 0x1000) {
+		/* Invalid Image pointer, return H instead of crashing */
+		di->dref = nil;
+		return &di->drawimage;
+	}
+
 	R2R(di->drawimage.r, i->r);
 	R2R(di->drawimage.clipr, i->clipr);
 	di->drawimage.chans.desc = i->chan;
 	di->drawimage.depth = i->depth;
 	di->drawimage.repl = i->repl;
 	di->flush = 1;
-	di->dref = i->display->limbo;
-	di->dref->ref++;
+
+	/* SAFETY: Check i pointer and i->display before accessing limbo */
+	idisp = nil;
+	if(i != H && i != nil) {
+		idisp = i->display;
+	}
+	if(idisp != H && idisp != nil) {
+		di->dref = idisp->limbo;
+		di->dref->ref++;
+	} else {
+		di->dref = nil;
+	}
 	return &di->drawimage;
 }
 

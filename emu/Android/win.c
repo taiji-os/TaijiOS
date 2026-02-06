@@ -20,6 +20,7 @@
 #include <memdraw.h>
 #include <cursor.h>
 #include "keyboard.h"
+#include "wm.h"
 
 #include <android/log.h>
 #include <GLES2/gl2.h>
@@ -49,6 +50,16 @@ static GLuint shader_program = 0;
 static GLuint position_buffer = 0;
 static GLuint texcoord_buffer = 0;
 static GLuint index_buffer = 0;
+
+/* OpenGL error checking helper */
+static void
+check_gl_error(const char* operation)
+{
+	GLenum error;
+	while ((error = glGetError()) != GL_NO_ERROR) {
+		LOGE("OpenGL error after %s: 0x%x", operation, error);
+	}
+}
 
 /* Shader sources */
 static const char vertex_shader_src[] =
@@ -132,12 +143,15 @@ init_gl_resources(void)
 		LOGE("Failed to compile shaders");
 		return 0;
 	}
+	check_gl_error("compile_shader");
 
 	/* Link program */
 	shader_program = glCreateProgram();
+	check_gl_error("glCreateProgram");
 	glAttachShader(shader_program, vs);
 	glAttachShader(shader_program, fs);
 	glLinkProgram(shader_program);
+	check_gl_error("glLinkProgram");
 
 	GLint linked;
 	glGetProgramiv(shader_program, GL_LINK_STATUS, &linked);
@@ -162,42 +176,80 @@ init_gl_resources(void)
 
 	/* Create buffers */
 	glGenBuffers(1, &position_buffer);
+	check_gl_error("glGenBuffers position");
 	glBindBuffer(GL_ARRAY_BUFFER, position_buffer);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	check_gl_error("position buffer data");
 
 	glGenBuffers(1, &texcoord_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER, texcoord_buffer);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(texcoords), texcoords, GL_STATIC_DRAW);
+	check_gl_error("texcoord buffer data");
 
 	glGenBuffers(1, &index_buffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+	check_gl_error("index buffer data");
 
 	/* Create texture */
 	glGenTextures(1, &texture);
+	check_gl_error("glGenTextures");
 	glBindTexture(GL_TEXTURE_2D, texture);
+	check_gl_error("glBindTexture");
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	check_gl_error("glTexParameteri");
 
 	LOGI("OpenGL ES resources initialized");
 	return 1;
 }
 
+/* Forward declaration */
+void flushmemscreen(Rectangle r);
+
 /*
  * attachscreen - Create the screen buffer
  * Called by devdraw.c to initialize the screen
- * Returns pointer to Memdata, or nil on failure
+ * Returns pointer to pixel data (uchar*), or nil on failure
+ *
+ * Note: This returns the pixel buffer directly, not Memdata*.
+ * devdraw.c expects uchar* and assigns it to screendata.bdata.
  */
-Memdata*
+uchar*
 attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 {
-	LOGI("attachscreen: Initializing screen buffer");
+	__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: ENTRY - Function called");
 
 	if (g_display == EGL_NO_DISPLAY || g_surface == EGL_NO_SURFACE) {
-		LOGE("attachscreen: EGL not initialized");
+		__android_log_print(ANDROID_LOG_ERROR, "ATTACHSCREEN", "attachscreen: EGL not initialized");
 		return nil;
+	}
+
+	/* If screendata is already allocated (from win_init), reuse it */
+	if (screendata != NULL && screenwidth > 0 && screenheight > 0) {
+		__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: Reusing existing screendata %p", screendata);
+
+		/* Return screen parameters */
+		r->min.x = 0;
+		r->min.y = 0;
+		r->max.x = screenwidth;
+		r->max.y = screenheight;
+		*chan = XRGB32;  /* 32-bit RGBA */
+		*d = 32;  /* Depth */
+		*width = screenwidth * 4;  /* Bytes per row */
+		*softscreen = 1;  /* Software rendering */
+
+		/* Update Memdata structure to point to existing buffer */
+		screendata_struct.base = (uintptr*)&screendata_struct;
+		screendata_struct.bdata = screendata;
+		screendata_struct.ref = 1;
+		screendata_struct.imref = 0;
+		screendata_struct.allocd = 1;
+
+		__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: Returning existing buffer %p", screendata);
+		return screendata;
 	}
 
 	/* Get screen dimensions from EGL */
@@ -207,36 +259,25 @@ attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 	screenwidth = w;
 	screenheight = h;
 
-	LOGI("attachscreen: Screen size %dx%d", screenwidth, screenheight);
+	__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: Allocating new buffer %dx%d", screenwidth, screenheight);
 
 	/* Allocate screen buffer (RGBA format) */
 	screensize = screenwidth * screenheight * 4;
 	screendata = malloc(screensize);
 	if (screendata == NULL) {
-		LOGE("attachscreen: Failed to allocate screen buffer");
+		__android_log_print(ANDROID_LOG_ERROR, "ATTACHSCREEN", "attachscreen: Failed to allocate screen buffer");
 		return nil;
 	}
 
-	/* Initialize to dark blue background */
-	memset(screendata, 0x10, screensize);  /* Dark blue: 0x10, 0x10, 0x30 */
+	/* Initialize to black background */
+	memset(screendata, 0, screensize);
 
 	/* Set up Memdata structure */
-	/* base is a back-pointer to Memdata itself (for compaction) */
 	screendata_struct.base = (uintptr*)&screendata_struct;
 	screendata_struct.bdata = screendata;
 	screendata_struct.ref = 1;
 	screendata_struct.imref = 0;
 	screendata_struct.allocd = 1;
-
-	/* Initialize OpenGL ES resources if not already done */
-	if (shader_program == 0) {
-		if (!init_gl_resources()) {
-			LOGE("attachscreen: Failed to initialize OpenGL ES resources");
-			free(screendata);
-			screendata = NULL;
-			return nil;
-		}
-	}
 
 	/* Return screen parameters */
 	r->min.x = 0;
@@ -248,22 +289,63 @@ attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 	*width = screenwidth * 4;  /* Bytes per row */
 	*softscreen = 1;  /* Software rendering */
 
-	LOGI("attachscreen: Screen buffer initialized successfully");
-	return &screendata_struct;
+	__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: Returning new buffer %p", screendata);
+	return screendata;
 }
 
 /*
  * flushmemscreen - Flush screen rectangle to display
  * Called by devdraw.c when screen content changes
+ *
+ * For Android with wmclient support:
+ * 1. Composite all registered wmclient windows to screenimage first
+ * 2. Then render the composited screenimage to OpenGL ES
  */
 void
 flushmemscreen(Rectangle r)
 {
+	static int call_count = 0;
+
 	if (g_display == EGL_NO_DISPLAY || g_surface == EGL_NO_SURFACE) {
 		return;
 	}
 
 	if (screendata == NULL) {
+		return;
+	}
+
+	/*
+	 * Step 1: Composite wmclient windows to screenimage
+	 * This ensures any wmclient window content is composited before rendering
+	 */
+	extern void wmcontext_composite_windows(Wmcontext* wm);
+	extern Wmcontext* wmcontext_get_active(void);
+
+	Wmcontext* active_wm = wmcontext_get_active();
+	if(active_wm != nil) {
+		wmcontext_composite_windows(active_wm);
+	}
+
+	/* Log flush calls for debugging */
+	if(call_count < 3 || (call_count % 100) == 0) {
+		/* Sample a few pixels to see if data is present */
+		/* Check test pattern location first (150,150) which should be green */
+		int test_pattern_offset = (150 * screenwidth + 150) * 4;
+		int center_offset = (screenheight/2 * screenwidth + screenwidth/2) * 4;
+		LOGI("flushmemscreen: call %d, screendata=%p", call_count, screendata);
+		LOGI("  test_pattern(150,150): [%d,%d,%d,%d]",
+		     screendata[test_pattern_offset + 0], screendata[test_pattern_offset + 1],
+		     screendata[test_pattern_offset + 2], screendata[test_pattern_offset + 3]);
+		LOGI("  center(%d,%d): [%d,%d,%d,%d]",
+		     screenwidth/2, screenheight/2,
+		     screendata[center_offset + 0], screendata[center_offset + 1],
+		     screendata[center_offset + 2], screendata[center_offset + 3]);
+	}
+	call_count++;
+
+	/* Verify texture is initialized */
+	if (texture == 0) {
+		LOGE("flushmemscreen: texture is 0, not initialized");
 		return;
 	}
 
@@ -283,32 +365,49 @@ flushmemscreen(Rectangle r)
 
 	/* Update texture from screen data */
 	glBindTexture(GL_TEXTURE_2D, texture);
+	check_gl_error("glBindTexture");
+
+	/* Use GL_RGBA - screendata should be in RGBA byte order */
+	/* The drawing code needs to convert from XRGB32 to RGBA */
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenwidth, screenheight,
 	             0, GL_RGBA, GL_UNSIGNED_BYTE, screendata);
+	check_gl_error("glTexImage2D");
 
 	/* Set viewport */
 	glViewport(0, 0, screenwidth, screenheight);
+	check_gl_error("glViewport");
 
 	/* Use shader program */
 	glUseProgram(shader_program);
+	check_gl_error("glUseProgram");
 
 	/* Set up vertex attributes */
 	GLint pos_attr = glGetAttribLocation(shader_program, "a_position");
+	if (pos_attr < 0) {
+		LOGE("flushmemscreen: Failed to get position attribute location");
+		return;
+	}
 	glEnableVertexAttribArray(pos_attr);
 	glBindBuffer(GL_ARRAY_BUFFER, position_buffer);
 	glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	check_gl_error("position pointer");
 
 	GLint texcoord_attr = glGetAttribLocation(shader_program, "a_texcoord");
+	if (texcoord_attr < 0) {
+		LOGE("flushmemscreen: Failed to get texcoord attribute location");
+		return;
+	}
 	glEnableVertexAttribArray(texcoord_attr);
 	glBindBuffer(GL_ARRAY_BUFFER, texcoord_buffer);
 	glVertexAttribPointer(texcoord_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	check_gl_error("texcoord pointer");
 
 	/* Draw fullscreen quad */
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+	check_gl_error("glDrawElements");
 
-	/* Swap buffers */
-	eglSwapBuffers(g_display, g_surface);
+	/* NOTE: Don't swap buffers here - win_swap will do that */
 }
 
 /*
@@ -320,6 +419,18 @@ drawcursor(Drawcursor *c)
 {
 	(void)c;
 	/* Cursor drawing not yet implemented for Android */
+}
+
+/*
+ * win_get_screendata - Get screen buffer info for wmcontext
+ * Called by wm.c to copy image data to screen
+ */
+void
+win_get_screendata(uchar **data, int *width, int *height)
+{
+	*data = screendata;
+	*width = screenwidth;
+	*height = screenheight;
 }
 
 /*
@@ -337,7 +448,7 @@ android_initdisplay(void (*error)(Display*, char*))
 	void *q;
 	EGLint w, h;
 
-	LOGI("android_initdisplay: Starting");
+	LOGI("android_initdisplay: ENTRY - FUNCTION START");
 
 	/* Allocate lock */
 	q = libqlalloc();
@@ -419,9 +530,84 @@ android_initdisplay(void (*error)(Display*, char*))
 	 * and allocimage will check disp->local before attempting to lock.
 	 * This avoids a potential deadlock since we're in the middle of init. */
 
+	/*
+	 * Initialize the screenimage from devdraw.c.
+	 * This is required for allocimage() to work properly.
+	 * The draw device's initscreenimage() will call attachscreen().
+	 */
+	extern int initscreenimage(void);
+	extern Memimage *screenimage;  /* From devdraw.c */
+
+	LOGI("android_initdisplay: About to call initscreenimage");
+	if(!initscreenimage()) {
+		LOGE("android_initdisplay: Failed to initialize screen image");
+		/* Continue anyway - try to allocate colors */
+	} else {
+		LOGI("android_initdisplay: initscreenimage succeeded, screenimage=%p", screenimage);
+	}
+
+	/* Draw a test pattern directly to screendata to verify rendering */
+	if(screendata != nil && screenwidth > 200 && screenheight > 200) {
+		/* Draw a colored test pattern */
+		/* Top-left: white (already there from win_init) */
+		/* (100,100)-(200,200): Green */
+		for(int y = 100; y < 200; y++) {
+			for(int x = 100; x < 200; x++) {
+				int offset = (y * screenwidth + x) * 4;
+				screendata[offset + 0] = 0;   /* R */
+				screendata[offset + 1] = 255; /* G */
+				screendata[offset + 2] = 0;   /* B */
+				screendata[offset + 3] = 255; /* A */
+			}
+		}
+		/* (200,200)-(300,300): Blue */
+		for(int y = 200; y < 300; y++) {
+			for(int x = 200; x < 300; x++) {
+				int offset = (y * screenwidth + x) * 4;
+				screendata[offset + 0] = 0;   /* R */
+				screendata[offset + 1] = 0;   /* G */
+				screendata[offset + 2] = 255; /* B */
+				screendata[offset + 3] = 255; /* A */
+			}
+		}
+		LOGI("android_initdisplay: Drew test pattern to screendata");
+
+		/* Also try drawing to screenimage using memdraw to verify that path works */
+		extern Memimage *screenimage;
+		extern void memimagedraw(Memimage*, Rectangle, Memimage*, Point, Memimage*, Point, int);
+
+		if(screenimage != nil && screenwidth > 400 && screenheight > 400) {
+			/* Try to draw a red square using memimagedraw */
+			/* First create a simple red square in memory */
+			static uchar red_square_data[16*16*4];  /* 16x16 red square */
+			for(int i = 0; i < 16*16*4; i += 4) {
+				red_square_data[i+0] = 255; /* R */
+				red_square_data[i+1] = 0;   /* G */
+				red_square_data[i+2] = 0;   /* B */
+				red_square_data[i+3] = 255; /* A */
+			}
+
+			/* Create a Memimage for the red square */
+			/* Note: This is a simplified test - we'll just draw directly to screendata */
+			/* Draw red square at (300, 300) */
+			for(int y = 300; y < 316; y++) {
+				for(int x = 300; x < 316; x++) {
+					int offset = (y * screenwidth + x) * 4;
+					screendata[offset + 0] = 255; /* R */
+					screendata[offset + 1] = 0;   /* G */
+					screendata[offset + 2] = 0;   /* B */
+					screendata[offset + 3] = 255; /* A */
+				}
+			}
+			LOGI("android_initdisplay: Drew red test square at (300,300)");
+		}
+	}
+
 	/* Allocate standard colors - On Android, these may fail if draw device isn't ready
 	 * We still return a valid display even if color allocation fails */
+	LOGI("android_initdisplay: About to allocimage white");
 	disp->white = allocimage(disp, Rect(0, 0, 1, 1), GREY1, 1, DWhite);
+	LOGI("android_initdisplay: white=%p", disp->white);
 	disp->black = allocimage(disp, Rect(0, 0, 1, 1), GREY1, 1, DBlack);
 	disp->opaque = allocimage(disp, Rect(0, 0, 1, 1), GREY1, 1, DWhite);
 	disp->transparent = allocimage(disp, Rect(0, 0, 1, 1), GREY1, 1, DBlack);
@@ -538,6 +724,47 @@ win_init(struct android_app* app)
 	g_surface_height = (int)h;
 
 	LOGI("win_init: EGL initialized %dx%d", g_surface_width, g_surface_height);
+
+	/* Initialize OpenGL ES resources while we have the context current on main thread */
+	if (shader_program == 0) {
+		if (!init_gl_resources()) {
+			LOGE("win_init: Failed to initialize OpenGL ES resources");
+			return -1;
+		}
+		LOGI("win_init: OpenGL ES resources initialized");
+	}
+
+	/* Initialize screen buffer directly if not already allocated by draw device */
+	if(screendata == NULL) {
+		screenwidth = g_surface_width;
+		screenheight = g_surface_height;
+		screensize = screenwidth * screenheight * 4;
+		screendata = malloc(screensize);
+		if(screendata != NULL) {
+			/* Initialize to black background */
+			memset(screendata, 0, screensize);
+			/* Draw a small white square in the top-left corner to verify rendering */
+			for(int y = 0; y < 100; y++) {
+				for(int x = 0; x < 100; x++) {
+					int offset = (y * screenwidth + x) * 4;
+					screendata[offset + 0] = 255; /* R */
+					screendata[offset + 1] = 255; /* G */
+					screendata[offset + 2] = 255; /* B */
+					screendata[offset + 3] = 255; /* A */
+				}
+			}
+			LOGI("win_init: Screen buffer allocated %dx%d, %d bytes",
+			     screenwidth, screenheight, screensize);
+
+			/* Do an initial render to show the test square */
+			Rectangle full_screen = Rect(0, 0, screenwidth, screenheight);
+			flushmemscreen(full_screen);
+			LOGI("win_init: Initial render complete");
+		} else {
+			LOGE("win_init: Failed to allocate screen buffer");
+		}
+	}
+
 	return 0;
 }
 
@@ -576,12 +803,31 @@ win_resize(int width, int height)
 	/* flushmemscreen will handle the actual rendering */
 }
 
+/* External function from wm.c to update display from wmcontext */
+extern int wm_update_active_display(void);
+
 /* Swap buffers and render */
 void
 win_swap(void)
 {
-	/* flushmemscreen is called by draw operations, just swap EGL buffers here */
+	static int swap_count = 0;
+	static int anim_x = 0;
+	static int wm_has_content = 0;
+
 	if(g_display != EGL_NO_DISPLAY && g_surface != EGL_NO_SURFACE) {
+		/* Just flush the current screen buffer and swap */
+		/* No test animation - let actual drawing show through */
+		if(screendata != NULL && screenwidth > 0 && screenheight > 0) {
+			Rectangle full_screen = Rect(0, 0, screenwidth, screenheight);
+			flushmemscreen(full_screen);
+		}
+
 		eglSwapBuffers(g_display, g_surface);
+
+		/* Log every 60 swaps */
+		if((swap_count % 60) == 0) {
+			LOGI("win_swap: swap_count=%d", swap_count);
+		}
+		swap_count++;
 	}
 }

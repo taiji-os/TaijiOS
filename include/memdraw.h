@@ -1,5 +1,8 @@
 #pragma	src	"/usr/inferno/libmemdraw"
 
+#ifndef _MEMDRAW_H_
+#define _MEMDRAW_H_
+
 typedef struct	Memimage Memimage;
 typedef struct	Memdata Memdata;
 typedef struct	Memsubfont Memsubfont;
@@ -171,7 +174,7 @@ extern	Memcmap	*memdefcmap;
 /*
  * Kernel interface
  */
-Memdata*	attachscreen(Rectangle*, ulong*, int*, int*, int*);
+uchar*	attachscreen(Rectangle*, ulong*, int*, int*, int*);
 void		memimagemove(void*, void*);
 
 /*
@@ -191,4 +194,6 @@ extern int		drawdebug;
 #pragma varargck type "lb" ulong
 #pragma varargck type "b" int
 #pragma varargck type "b" uint
+
+#endif /* _MEMDRAW_H_ */
 

@@ -1135,14 +1135,14 @@ add_reactive_binding(cg: ref Codegen, widget_path: string, property_name: string
 }
 
 # Generate code for a single widget
-generate_widget(cg: ref Codegen, w: ref Widget, parent: string, is_root: int): string
+generate_widget(cg: ref Codegen, prog: ref Program, w: ref Widget, parent: string, is_root: int): string
 {
     if (w == nil)
         return nil;
 
     # Skip wrapper widgets only (keep layout widgets!)
     if (w.is_wrapper) {
-        return generate_widget_list(cg, w.children, parent, is_root);
+        return generate_widget_list(cg, prog, w.children, parent, is_root);
     }
 
     # Build widget path
@@ -1319,13 +1319,17 @@ generate_widget(cg: ref Codegen, w: ref Widget, parent: string, is_root: int): s
 
     # For root widgets (direct children of toplevel), configure their size
     # Root widgets have no parent to give them dimensions, so they need explicit size
-    if (is_root && cg.width > 0 && cg.height > 0) {
-        append_tk_cmd(cg, sys->sprint("%s configure -width %d -height %d", widget_path, cg.width, cg.height));
+    if (is_root && prog.app != nil && prog.app.props != nil) {
+        (w, ok) := get_number_prop(prog.app.props, "width");
+        (h, ok2) := get_number_prop(prog.app.props, "height");
+        if ((ok && w > 0) || (ok2 && h > 0)) {
+            append_tk_cmd(cg, sys->sprint("%s configure -width %d -height %d", widget_path, w, h));
+        }
     }
 
     # Process children FIRST (they need to be packed before this widget)
     if (w.children != nil) {
-        err := generate_widget_list(cg, w.children, widget_path, 0);
+        err := generate_widget_list(cg, prog, w.children, widget_path, 0);
         if (err != nil)
             return err;
     }
@@ -1375,7 +1379,7 @@ generate_widget(cg: ref Codegen, w: ref Widget, parent: string, is_root: int): s
 }
 
 # Process widget list
-generate_widget_list(cg: ref Codegen, w: ref Widget, parent: string, is_root: int): string
+generate_widget_list(cg: ref Codegen, prog: ref Program, w: ref Widget, parent: string, is_root: int): string
 {
     while (w != nil) {
         if (w.is_wrapper) {
@@ -1383,11 +1387,11 @@ generate_widget_list(cg: ref Codegen, w: ref Widget, parent: string, is_root: in
             child := w.children;
             while (child != nil) {
                 if (child.is_wrapper) {
-                    err := generate_widget_list(cg, child.children, parent, is_root);
+                    err := generate_widget_list(cg, prog, child.children, parent, is_root);
                     if (err != nil)
                         return err;
                 } else {
-                    err := generate_widget(cg, child, parent, is_root);
+                    err := generate_widget(cg, prog, child, parent, is_root);
                     if (err != nil)
                         return err;
                 }
@@ -1395,7 +1399,7 @@ generate_widget_list(cg: ref Codegen, w: ref Widget, parent: string, is_root: in
             }
         } else {
             # Generate widget normally (including layout widgets like Center/Column/Row)
-            err := generate_widget(cg, w, parent, is_root);
+            err := generate_widget(cg, prog, w, parent, is_root);
             if (err != nil)
                 return err;
         }
@@ -1413,7 +1417,7 @@ collect_widget_commands(cg: ref Codegen, prog: ref Program): string
     if (prog == nil || prog.app == nil || prog.app.body == nil)
         return nil;
 
-    return generate_widget_list(cg, prog.app.body, ".", 1);
+    return generate_widget_list(cg, prog, prog.app.body, ".", 1);
 }
 
 # Generate variable declarations
@@ -1813,7 +1817,7 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
 }
 
 # Generate tkcmds array
-generate_tkcmds_array(cg: ref Codegen): string
+generate_tkcmds_array(cg: ref Codegen, prog: ref Program): string
 {
     sys->fprint(cg.output, "\ntkcmds := array[] of {\n");
 
@@ -1831,9 +1835,20 @@ generate_tkcmds_array(cg: ref Codegen): string
         rev = tl rev;
     }
 
-    # Only add pack propagate if width/height were explicitly set
+    # Only add pack propagate if width/height were explicitly set on the Window
     # This prevents the window from auto-sizing when dimensions are specified
-    if (cg.width > 0 || cg.height > 0) {
+    has_width := 0;
+    has_height := 0;
+    if (prog.app != nil && prog.app.props != nil) {
+        (w, ok) := get_number_prop(prog.app.props, "width");
+        if (ok && w > 0)
+            has_width = 1;
+        (h, ok2) := get_number_prop(prog.app.props, "height");
+        if (ok2 && h > 0)
+            has_height = 1;
+    }
+
+    if (has_width || has_height) {
         sys->fprint(cg.output, "    \"pack propagate . 0\",\n");
     }
     sys->fprint(cg.output, "    \"update\"\n");
@@ -2216,7 +2231,7 @@ generate(output: string, prog: ref Program, module_name: string): string
         return err;
     }
 
-    err = generate_tkcmds_array(cg);
+    err = generate_tkcmds_array(cg, prog);
     if (err != nil) {
         fd = nil;
         return err;
