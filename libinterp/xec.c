@@ -390,13 +390,18 @@ OP(frame)
 	if (t->np == 0) {
 		__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "  WARNING: t->np=0, initializing all slots to H!");
 		/* FIX: Initialize all slots to H even if t->np=0
-		 * This prevents crashes when bytecode accesses slots beyond what the type descriptor covers
+		 * This prevents crashes when bytecode accesses slots beyond what the type descriptor covers.
+		 * The type bitmap covers the entire frame including header, so we init from the start.
+		 * Note: We don't use memset because H != 0 (H is all 1s in two's complement).
 		 */
 		int nslots = t->size / sizeof(WORD);
 		WORD **w = (WORD**)f;
 		for (int i = 0; i < nslots; i++) {
 			w[i] = H;
 		}
+		/* Restore the fields that were set before init */
+		f->t = t;
+		f->mr = nil;
 	}
 #endif
 	if (t->np)
@@ -444,12 +449,18 @@ OP(mframe)
 	__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "mframe: f=%p t=%p t->size=%d t->np=%d", f, t, t->size, t->np);
 	if (t->np == 0) {
 		__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "  WARNING: t->np=0, initializing all slots to H!");
-		/* FIX: Initialize all slots to H even if t->np=0 */
+		/* FIX: Initialize all slots to H even if t->np=0
+		 * This prevents crashes when bytecode accesses slots beyond what the type descriptor covers.
+		 * The type bitmap covers the entire frame including header, so we init from the start.
+		 */
 		int nslots = t->size / sizeof(WORD);
 		WORD **w = (WORD**)f;
 		for (int i = 0; i < nslots; i++) {
 			w[i] = H;
 		}
+		/* Restore the fields that were set before init */
+		f->t = t;
+		f->mr = nil;
 	}
 #endif
 	if (t->np)

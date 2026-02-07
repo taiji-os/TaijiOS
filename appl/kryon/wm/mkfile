@@ -10,7 +10,7 @@ DISFILES=${KRYFILES:%.kry=%.dis}
 
 all:V:	$BFILES $DISFILES
 
-%.b:	%.kry
+%.b:	%.kry	/dis/kryon.dis
 	/dis/kryon.dis $stem.kry
 
 %.dis:	%.b

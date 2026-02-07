@@ -474,6 +474,15 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
             interval = int num_tok.number_val;
         }
 
+        # Inline functions need explicit return statement in Limbo
+        # Prepend "return " and ensure semicolon at end
+        if (len body > 0) {
+            body = "return " + body;
+            if (body[len body - 1] != ';') {
+                body += ";";
+            }
+        }
+
         # Create function declaration with inline body
         fn_decl := ast->functiondecl_create(name, body);
         fn_decl.params = params;
@@ -506,30 +515,93 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
             body += sys->sprint("%bd", tok.number_val);
         } else if (tok.toktype == Lexer->TOKEN_ARROW) {
             body += "->";
-        } else if (tok.toktype == '+' + 256) {
-            body += "+=";
-        } else if (tok.toktype == '-' + 256) {
-            body += "-=";
-        } else if (tok.toktype == '=' + 256) {
-            body += "==";
-        } else if (tok.toktype == '!' + 256) {
-            body += "!=";
-        } else if (tok.toktype == '<' + 256) {
-            body += "<=";
-        } else if (tok.toktype == '>' + 256) {
-            body += ">=";
-        } else if (tok.toktype == '+' + 512) {
-            body += "++";
-        } else if (tok.toktype == '-' + 512) {
-            body += "--";
-        } else if (tok.toktype == '*' + 256) {
-            body += "*=";
-        } else if (tok.toktype == '/' + 256) {
-            body += "/=";
-        } else if (tok.toktype == '%' + 256) {
-            body += "%=";
+        } else if (tok.toktype == '\n') {
+            body += "\n";
         } else if (tok.toktype >= 32 && tok.toktype <= 126) {
             body += sys->sprint("%c", tok.toktype);
+        } else {
+            # Handle keyword tokens
+            case tok.toktype {
+            Lexer->TOKEN_VAR or
+            Lexer->TOKEN_FN or
+            Lexer->TOKEN_WINDOW or
+            Lexer->TOKEN_FRAME or
+            Lexer->TOKEN_BUTTON or
+            Lexer->TOKEN_LABEL or
+            Lexer->TOKEN_ENTRY or
+            Lexer->TOKEN_CHECKBUTTON or
+            Lexer->TOKEN_RADIOBUTTON or
+            Lexer->TOKEN_LISTBOX or
+            Lexer->TOKEN_CANVAS or
+            Lexer->TOKEN_SCALE or
+            Lexer->TOKEN_MENUBUTTON or
+            Lexer->TOKEN_MESSAGE or
+            Lexer->TOKEN_COLUMN or
+            Lexer->TOKEN_ROW or
+            Lexer->TOKEN_CENTER =>
+                # These keywords should have been handled by identifier case
+                # But if they appear as tokens, convert to string
+                if (tok.toktype == Lexer->TOKEN_VAR)
+                    body += "var";
+                else if (tok.toktype == Lexer->TOKEN_FN)
+                    body += "fn";
+                else if (tok.toktype == Lexer->TOKEN_WINDOW)
+                    body += "Window";
+                else if (tok.toktype == Lexer->TOKEN_FRAME)
+                    body += "Frame";
+                else if (tok.toktype == Lexer->TOKEN_BUTTON)
+                    body += "Button";
+                else if (tok.toktype == Lexer->TOKEN_LABEL)
+                    body += "Label";
+                else if (tok.toktype == Lexer->TOKEN_ENTRY)
+                    body += "Entry";
+                else if (tok.toktype == Lexer->TOKEN_CHECKBUTTON)
+                    body += "Checkbutton";
+                else if (tok.toktype == Lexer->TOKEN_RADIOBUTTON)
+                    body += "Radiobutton";
+                else if (tok.toktype == Lexer->TOKEN_LISTBOX)
+                    body += "Listbox";
+                else if (tok.toktype == Lexer->TOKEN_CANVAS)
+                    body += "Canvas";
+                else if (tok.toktype == Lexer->TOKEN_SCALE)
+                    body += "Scale";
+                else if (tok.toktype == Lexer->TOKEN_MENUBUTTON)
+                    body += "Menubutton";
+                else if (tok.toktype == Lexer->TOKEN_MESSAGE)
+                    body += "Message";
+                else if (tok.toktype == Lexer->TOKEN_COLUMN)
+                    body += "Column";
+                else if (tok.toktype == Lexer->TOKEN_ROW)
+                    body += "Row";
+                else if (tok.toktype == Lexer->TOKEN_CENTER)
+                    body += "Center";
+
+            '+' + 256 =>
+                body += "+=";
+            '-' + 256 =>
+                body += "-=";
+            '=' + 256 =>
+                body += "==";
+            '!' + 256 =>
+                body += "!=";
+            '<' + 256 =>
+                body += "<=";
+            '>' + 256 =>
+                body += ">=";
+            '+' + 512 =>
+                body += "++";
+            '-' + 512 =>
+                body += "--";
+            '*' + 256 =>
+                body += "*=";
+            '/' + 256 =>
+                body += "/=";
+            '%' + 256 =>
+                body += "%=";
+            * =>
+                # Unknown token, skip
+                ;
+            }
         }
 
         # Track braces
@@ -1278,6 +1350,22 @@ extract_local_vars(body: string): list of string
                 # Either way, the first identifier after 'var' is the variable name
                 varname := name_tok.string_val;
 
+                # Skip to end of declaration (consume tokens until we hit ';' or newline)
+                # This handles both: var name = expr and var name: type = expr
+                while (1) {
+                    peek_tok := lexer->peek_token(l);
+                    if (peek_tok.toktype == Lexer->TOKEN_ENDINPUT ||
+                        peek_tok.toktype == ';' ||
+                        peek_tok.toktype == '\n')
+                        break;
+                    lexer->lex(l);  # consume token
+                }
+
+                # Consume the ';' or '\n' too
+                peek_tok := lexer->peek_token(l);
+                if (peek_tok.toktype == ';' || peek_tok.toktype == '\n')
+                    lexer->lex(l);
+
                 # Add to locals (avoid duplicates)
                 found := 0;
                 for (l2 := locals; l2 != nil; l2 = tl l2) {
@@ -1404,8 +1492,15 @@ check_undefined_variables(prog: ref Program): string
         v = v.next;
     }
 
-    # Check each function
+    # Add function names to module-level symbol table (so functions can call each other)
     fd := prog.function_decls;
+    while (fd != nil) {
+        ast->symboltable_add_module_var(st, fd.name);
+        fd = fd.next;
+    }
+
+    # Check each function
+    fd = prog.function_decls;
     while (fd != nil) {
         # Create function-specific symbol table
         fn_st := ast->symboltable_create();
@@ -1466,6 +1561,117 @@ limbo_escape(s: string): string
         }
     }
     return res;
+}
+
+# Convert Kryon var syntax to Limbo syntax
+# Kryon: var name: type = expr  or  var name: type;
+# Limbo: name := expr  or  name : type = expr;
+convert_var_syntax(body: string): string
+{
+    if (body == nil || len body == 0)
+        return body;
+
+    result := "";
+    i := 0;
+
+    while (i < len body) {
+        # Look for 'var' keyword
+        if (i + 3 < len body && body[i] == 'v' && body[i+1] == 'a' && body[i+2] == 'r') {
+            # Check if this is really 'var' keyword (not part of another word)
+            is_var := 0;
+            if (i == 0 || body[i-1] == ' ' || body[i-1] == '\t' || body[i-1] == '\n' || body[i-1] == ';' || body[i-1] == '{' || body[i-1] == '(') {
+                is_var = 1;
+            }
+
+            if (is_var && (i + 3 >= len body || (body[i+3] == ' ' || body[i+3] == '\t' || body[i+3] == ':'))) {
+                j := i + 3;
+
+                # Skip whitespace after 'var'
+                while (j < len body && (body[j] == ' ' || body[j] == '\t'))
+                    j++;
+
+                if (j >= len body)
+                    break;
+
+                # Find variable name (identifier)
+                start_name := j;
+                while (j < len body && ((body[j] >= 'a' && body[j] <= 'z') ||
+                                       (body[j] >= 'A' && body[j] <= 'Z') ||
+                                       (body[j] >= '0' && body[j] <= '9') ||
+                                       body[j] == '_'))
+                    j++;
+
+                if (j > start_name) {
+                    varname := body[start_name:j];
+
+                    # Skip whitespace and look for ':'
+                    while (j < len body && (body[j] == ' ' || body[j] == '\t'))
+                        j++;
+
+                    if (j < len body && body[j] == ':') {
+                        # Found 'var name :' - skip the 'var' and ':'
+                        j++;  # skip ':'
+
+                        # Skip whitespace after ':'
+                        while (j < len body && (body[j] == ' ' || body[j] == '\t'))
+                            j++;
+
+                        # Find type name
+                        start_type := j;
+                        while (j < len body && ((body[j] >= 'a' && body[j] <= 'z') ||
+                                               (body[j] >= 'A' && body[j] <= 'Z') ||
+                                               (body[j] >= '0' && body[j] <= '9') ||
+                                               body[j] == '_' || body[j] == '-' || body[j] == '>'))
+                            j++;
+
+                        # Add variable name to result
+                        result += varname;
+
+                        # Skip whitespace and look for '=' or ';'
+                        while (j < len body && (body[j] == ' ' || body[j] == '\t'))
+                            j++;
+
+                        if (j < len body && body[j] == '=') {
+                            # 'var name: type = expr' -> 'name := expr'
+                            result += " := ";
+                            j++;  # skip '='
+
+                            # Skip whitespace after '='
+                            while (j < len body && (body[j] == ' ' || body[j] == '\t'))
+                                j++;
+
+                            # Copy the rest of the expression until ';'
+                            while (j < len body && body[j] != ';' && body[j] != '\n') {
+                                result[len result] = body[j];
+                                j++;
+                            }
+
+                            # Skip the ';' if present
+                            if (j < len body && body[j] == ';')
+                                j++;
+
+                            # Add semicolon and continue
+                            result += ";\n";
+                            i = j;
+                            continue;
+                        } else if (j < len body && body[j] == ';') {
+                            # 'var name: type;' -> 'name : type;'
+                            result += " : " + body[start_type:j] + ";\n";
+                            j++;  # skip ';'
+                            i = j;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        # Copy character and continue
+        result[len result] = body[i];
+        i++;
+    }
+
+    return result;
 }
 
 # Escape a string for Tk
@@ -2294,8 +2500,10 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
         sys->fprint(cg.output, "{\n");
 
         if (fd.body != nil && fd.body != "") {
+            # Convert Kryon var syntax to Limbo syntax
+            body := convert_var_syntax(fd.body);
+
             # Trim leading whitespace/newlines from body
-            body := fd.body;
             while (len body > 0 && (body[0] == ' ' || body[0] == '\t' || body[0] == '\n' || body[0] == '\r')) {
                 body = body[1:];
             }
@@ -2328,6 +2536,11 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
                     # Skip empty lines
                     if (len line == 0)
                         continue;
+
+                    # Add semicolon if line doesn't end with one
+                    if (len line > 0 && line[len line - 1] != ';' && line[len line - 1] != '{' && line[len line - 1] != '}') {
+                        line += ";";
+                    }
 
                     # Indent the line
                     sys->fprint(cg.output, "    %s\n", line);
