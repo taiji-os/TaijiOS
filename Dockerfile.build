@@ -81,7 +81,7 @@ echo \"Bootstrap complete\"\n\
 # Build TaijiOS\n\
 cd \$ROOT\n\
 export PATH=\"\$ROOT/Linux/amd64/bin:\$PATH\"\n\
-mk && mk all\n\
+mk && mk install\n\
 " > /build.sh && chmod +x /build.sh
 
 CMD ["/build.sh"]

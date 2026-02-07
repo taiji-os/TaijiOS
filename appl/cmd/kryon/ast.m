@@ -129,6 +129,7 @@ Ast: module
     # Regular function declaration ADT (for callbacks)
     FunctionDecl: adt {
         name: string;
+        params: string;               # parameter list string (e.g., "x: int, y: int")
         body: string;
         return_type: string;          # return type annotation (e.g., "string")
         reactive_interval: int;       # reactive binding interval (0 for non-reactive)
@@ -159,6 +160,7 @@ Ast: module
         reactive_fns: ref ReactiveFunction;
         module_imports: ref ModuleImport;
         function_decls: ref FunctionDecl;  # regular function declarations
+        window_type: int;    # 0=Tk, 1=Draw/wmclient
     };
 
     # AST construction functions

@@ -11,9 +11,14 @@ SYSMODULES= \
 
 DISBIN=$ROOT/dis/demo/spree
 
-<$ROOT/mkfiles/mkdis
-
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
+
+all:V: $SHTARG
+install:V:	$SHFILES
+clean:V:
+	rm -f *.dis *.sbl
+nuke:V:	clean
+	rm -f $SHFILES
 all:V: $SHTARG
 install:V:	$SHFILES
 %.install:V:	$DISBIN/%

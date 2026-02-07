@@ -60,8 +60,12 @@ gengetwindow(Display *d, char *winname, Image **winp, Screen **scrp, int ref)
 /*
  * Android-specific initdisplay override
  * Uses EGL surface instead of /dev/draw/new
+ *
+ * Returns the existing display if one was already created, to avoid
+ * creating multiple display objects which causes memory corruption.
  */
 extern Display* android_initdisplay(void (*error)(Display*, char*));
+extern void *_display;  /* Global display from emu/Android/os.c */
 
 Display*
 initdisplay(char *dev, char *win, void(*error)(Display*, char*))
@@ -70,6 +74,11 @@ initdisplay(char *dev, char *win, void(*error)(Display*, char*))
 
 	USED(dev);
 	USED(win);
+
+	/* If display already exists, return it */
+	if(_display != nil) {
+		return (Display*)_display;
+	}
 
 	disp = android_initdisplay(error);
 	if(disp == nil)

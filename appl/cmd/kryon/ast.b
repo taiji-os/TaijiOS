@@ -8,7 +8,7 @@ include "ast.m";
 
 program_create(): ref Program
 {
-    return ref Program (nil, nil, nil, nil, nil, nil, nil);
+    return ref Program (nil, nil, nil, nil, nil, nil, nil, 0);
 }
 
 var_decl_create(name: string, typ: string, init_expr: string, init: ref Value): ref VarDecl
@@ -394,7 +394,7 @@ reactivebinding_list_add(head: ref ReactiveBinding, binding: ref ReactiveBinding
 
 functiondecl_create(name: string, body: string): ref FunctionDecl
 {
-    return ref FunctionDecl (name, body, "", 0, nil);
+    return ref FunctionDecl (name, "", body, "", 0, nil);
 }
 
 functiondecl_list_add(head: ref FunctionDecl, fn_decl: ref FunctionDecl): ref FunctionDecl

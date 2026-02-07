@@ -36,5 +36,5 @@ DISBIN=$ROOT/dis/svc/webget
 install:V:	install-logs
 
 install-logs:V:
-	rm -f $ROOT/services/webget/webget.log && cp webget.log $ROOT/services/webget/webget.log
+	mkdir -p $ROOT/services/webget && rm -f $ROOT/services/webget/webget.log && cp webget.log $ROOT/services/webget/webget.log
 	# chmod 644 $ROOT/services/webget/webget.log

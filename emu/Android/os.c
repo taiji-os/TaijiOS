@@ -325,17 +325,17 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Try clock first - user requested to test it */
+	/* Simple tests only - skip Tk modules for now */
 	static const char* test_modules[] = {
-		"dis/clock.dis",       /* Clock application - user requested */
-		"dis/testsimple.dis",  /* Has Sys_print calls that log to Android */
+		"dis/testsimple.dis",  /* Simple test that just prints */
+		"dis/testprint.dis",   /* Test printing */
+		"dis/testsleep.dis",   /* Test sleep */
 		"dis/testload.dis",    /* Minimal Draw module test */
-		"dis/minimal.dis",     /* GUI test with button */
-		"dis/testprint.dis",
 		"dis/testnobox.dis",
-		"dis/testsleep.dis",
 		"dis/testwm.dis",
-		"dis/hello.dis",
+		/* TODO: Fix Tk module loading before enabling these */
+		/* "dis/minimal.dis", */
+		/* "dis/clock.dis", */
 		NULL
 	};
 
@@ -572,7 +572,7 @@ oscmd(char **argv, int nice, char *dir, int *pid)
 	USED(dir);
 	USED(nice);
 	/* TODO: Implement for Android */
-	return nil;
+	return H;
 }
 
 int
@@ -679,7 +679,7 @@ memlalloc(int w, int h, int fill)
 	USED(w);
 	USED(h);
 	USED(fill);
-	return nil;
+	return H;
 }
 
 void
@@ -786,7 +786,7 @@ fdtochan(Fgrp *f, int fd, int mode, int is_dup, int head)
 	USED(mode);
 	USED(is_dup);
 	USED(head);
-	return nil;
+	return H;
 }
 
 /* SHA1, MD5, MD4 hash functions are now provided by libsec */
@@ -855,7 +855,7 @@ _runebsearch(Rune c, Rune *tab, int n)
 	USED(c);
 	USED(tab);
 	USED(n);
-	return nil;
+	return H;
 }
 
 /* vfprint - vfprintf to file descriptor */
@@ -1005,21 +1005,21 @@ mpint*
 rsadecrypt(RSApriv *k, mpint *in, mpint *out)
 {
 	USED(k); USED(in); USED(out);
-	return nil;
+	return H;
 }
 
 mpint*
 rsaencrypt(RSApub *k, mpint *in, mpint *out)
 {
 	USED(k); USED(in); USED(out);
-	return nil;
+	return H;
 }
 
 RSApriv*
 rsafill(mpint *n, mpint *e, mpint *d, mpint *p, mpint *q)
 {
 	USED(n); USED(e); USED(d); USED(p); USED(q);
-	return nil;
+	return H;
 }
 
 void
@@ -1032,7 +1032,7 @@ RSApriv*
 rsagen(int nlen, int elen, int rounds)
 {
 	USED(nlen); USED(elen); USED(rounds);
-	return nil;
+	return H;
 }
 
 /* Crypto module init functions */
@@ -1056,7 +1056,7 @@ EGsig*
 egsign(EGpriv *k, mpint *m)
 {
 	USED(k); USED(m);
-	return nil;
+	return H;
 }
 
 void
@@ -1069,7 +1069,7 @@ DSAsig*
 dsasign(DSApriv *k, mpint *m)
 {
 	USED(k); USED(m);
-	return nil;
+	return H;
 }
 
 void
@@ -1099,7 +1099,7 @@ char*
 Brdstr(char *a, int n, int (*f)(void*, int))
 {
 	USED(a); USED(n); USED(f);
-	return nil;
+	return H;
 }
 
 /* enc32/dec32 - minimal stubs */
@@ -1130,7 +1130,7 @@ EGpriv*
 eggen(int nlen, int rounds)
 {
 	USED(nlen); USED(rounds);
-	return nil;
+	return H;
 }
 
 void
@@ -1151,7 +1151,7 @@ DSApriv*
 dsagen(DSApub *opub)
 {
 	USED(opub);
-	return nil;
+	return H;
 }
 
 void
@@ -1308,7 +1308,7 @@ ftloadglyph(Face *f, Rune r)
 {
 	USED(f);
 	USED(r);
-	return nil;
+	return H;
 }
 
 Face*
@@ -1316,7 +1316,7 @@ ftnewface(uchar *data, int len)
 {
 	USED(data);
 	USED(len);
-	return nil;
+	return H;
 }
 
 void
@@ -1687,7 +1687,7 @@ newdyncode(int size, char *path, Dir *d)
 	USED(size);
 	USED(path);
 	USED(d);
-	return nil;
+	return H;
 }
 
 /* System error string */
@@ -1930,7 +1930,7 @@ tklook(void *tk, int x, int y, int want)
 	USED(x);
 	USED(y);
 	USED(want);
-	return nil;
+	return H;
 }
 
 static void
@@ -1971,7 +1971,7 @@ tknewobj(void *tk, void *parent, char *name, char *type)
 	USED(parent);
 	USED(name);
 	USED(type);
-	return nil;
+	return H;
 }
 
 void Sys_stream(void *fp)
@@ -1996,7 +1996,7 @@ tkfreeobj(void *tk, void *obj)
 static void*
 tksorttable(void)
 {
-	return nil;
+	return H;
 }
 
 static char*
@@ -2105,14 +2105,14 @@ libfdtochan(int fd, int mode)
 {
 	USED(fd);
 	USED(mode);
-	return nil;
+	return H;
 }
 
 Dir*
 libdirfstat(int fd)
 {
 	USED(fd);
-	return nil;
+	return H;
 }
 
 int
@@ -2134,7 +2134,7 @@ void*
 libqlowner(void *q)
 {
 	USED(q);
-	return nil;
+	return H;
 }
 
 /* Sys_print - print to stdout (fd 1), which we redirect to logcat */
@@ -2183,7 +2183,7 @@ Brdline(Biobuf *bp, int n)
 {
 	USED(bp);
 	USED(n);
-	return nil;
+	return H;
 }
 
 int
@@ -2219,7 +2219,7 @@ tkgc(void *tk, void *d, int fill)
 	USED(tk);
 	USED(d);
 	USED(fill);
-	return nil;
+	return H;
 }
 
 static void
@@ -2351,7 +2351,7 @@ tkaddchild(void *tk, void *parent, void *child)
 	USED(tk);
 	USED(parent);
 	USED(child);
-	return nil;
+	return H;
 }
 
 static int
@@ -2398,7 +2398,7 @@ tkfindsub(void *tk, void *w, char *name)
 	USED(tk);
 	USED(w);
 	USED(name);
-	return nil;
+	return H;
 }
 
 static void
@@ -2547,7 +2547,7 @@ static char**
 tkdupenv(char **env)
 {
 	USED(env);
-	return nil;
+	return H;
 }
 
 /* Kernel channel I/O */
@@ -2603,7 +2603,7 @@ static char**
 tknewenv(char **env)
 {
 	USED(env);
-	return nil;
+	return H;
 }
 
 static void

@@ -79,13 +79,17 @@ Codegen: adt {
     width: int;
     height: int;
     reactive_bindings: list of (string, string, string);  # (widget_path, property_name, fn_name)
+    is_draw_backend: int;    # 1 if using Draw/wmclient
+    ondraw_fn: string;        # name of onDraw function
+    ondraw_interval: int;     # timer interval in ms
+    oninit_fn: string;        # name of onInit function
 
     create: fn(output: ref Sys->FD, module_name: string): ref Codegen;
 };
 
 Codegen.create(output: ref Sys->FD, module_name: string): ref Codegen
 {
-    return ref Codegen(module_name, output, nil, 0, nil, 0, 0, nil);
+    return ref Codegen(module_name, output, nil, 0, nil, 0, 0, nil, 0, "", 0, "");
 }
 
 # Module info for code generation
@@ -155,14 +159,7 @@ parse_use_statement(p: ref Parser): (ref ModuleImport, string)
     }
     module_name := module_tok.string_val;
 
-    # Optional alias
-    alias := "";
-    if (p.peek().toktype == Lexer->TOKEN_IDENTIFIER) {
-        alias_tok := p.next();
-        alias = alias_tok.string_val;
-    }
-
-    return (ast->moduleimport_create(module_name, alias), nil);
+    return (ast->moduleimport_create(module_name, ""), nil);
 }
 
 # Parse a reactive function declaration: name: fn() = expression @ N
@@ -325,14 +322,39 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
 
     name := name_tok.string_val;
 
-    # Expect "()"
+    # Expect "(" to start parameter list
     (tok1, err1) := p.expect('(');
     if (err1 != nil)
         return (nil, err1);
 
-    (tok2, err2) := p.expect(')');
-    if (err2 != nil)
-        return (nil, err2);
+    # Skip parameters until ")" - we preserve them in the body
+    # For simplicity, we just look for the matching ")"
+    paren_count := 1;
+    params := "";
+    while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.next();
+        if (tok.toktype == '(')
+            paren_count++;
+        else if (tok.toktype == ')')
+            paren_count--;
+
+        if (paren_count > 0) {
+            # Add to params string with proper spacing
+            if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                # Check if previous char was not a space and next is not special
+                if (len params > 0 && params[len params - 1] != ' ' &&
+                    params[len params - 1] != '(' && params[len params - 1] != ':')
+                    params += " ";
+                params += tok.string_val;
+            } else if (tok.toktype == ':') {
+                params += ": ";
+            } else if (tok.toktype == ',') {
+                params += ", ";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                params += sys->sprint("%c", tok.toktype);
+            }
+        }
+    }
 
     # Check for optional return type: : string
     return_type := "";
@@ -393,6 +415,7 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
 
         # Create function declaration with inline body
         fn_decl := ast->functiondecl_create(name, body);
+        fn_decl.params = params;
         fn_decl.return_type = return_type;
         fn_decl.reactive_interval = interval;
         return (fn_decl, nil);
@@ -403,41 +426,35 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
     if (err3 != nil)
         return (nil, err3);
 
-    # Parse function body until "}"
-    body := "";
+    # Parse function body by reading directly from source
+    # We're already past the opening '{', so read from current position
+    start_pos := p.l.pos;
     brace_count := 1;
 
-    while (brace_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
-        tok := p.next();
+    while (brace_count > 0 && p.l.pos < len p.l.src_data) {
+        c := p.l.src_data[p.l.pos];
+        p.l.pos++;
 
-        if (tok.toktype == '{')
+        if (c == '{')
             brace_count++;
-        else if (tok.toktype == '}')
+        else if (c == '}')
             brace_count--;
-        else {
-            # Add token content to body
-            if (tok.toktype == Lexer->TOKEN_STRING) {
-                body += "\"" + limbo_escape(tok.string_val) + "\"";
-            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
-                body += tok.string_val;
-            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
-                body += sys->sprint("%bd", tok.number_val);
-            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
-                body += "->";
-            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
-                body += sys->sprint("%c", tok.toktype);
-            }
-
-            next_tok := p.peek();
-            if (next_tok.toktype != '}' && next_tok.toktype != '{' &&
-                next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
-                should_add_space(tok.toktype, next_tok.toktype)) {
-                body += " ";
-            }
+        else if (c == '\n') {
+            p.l.lineno++;
+            p.l.column = 0;
+        } else if (c != '\r') {
+            p.l.column++;
         }
     }
 
+    # Extract body (excluding the closing brace)
+    body := p.l.src_data[start_pos : p.l.pos - 1];
+
+    # Reset peek token since we modified position
+    p.has_peek = 0;
+
     fn_decl := ast->functiondecl_create(name, body);
+    fn_decl.params = params;
     fn_decl.return_type = return_type;
     return (fn_decl, nil);
 }
@@ -499,7 +516,30 @@ parse_property(p: ref Parser): (ref Property, string)
         return (nil, err1);
     }
 
-    # Parse value
+    # Check for reactive syntax: identifier @ number
+    if (p.peek().toktype == Lexer->TOKEN_IDENTIFIER) {
+        id_tok := p.next();
+        id_name := id_tok.string_val;
+
+        if (p.peek().toktype == Lexer->TOKEN_AT) {
+            p.next();  # consume @
+            num_tok := p.next();
+            if (num_tok.toktype != Lexer->TOKEN_NUMBER)
+                return (nil, fmt_error(p, "expected number after '@'"));
+
+            interval := int num_tok.number_val;
+            prop := ast->property_create(name);
+            prop.value = ast->value_create_ident(sys->sprint("%s@%d", id_name, interval));
+            return (prop, nil);
+        }
+
+        # Just identifier, no @
+        prop := ast->property_create(name);
+        prop.value = ast->value_create_ident(id_name);
+        return (prop, nil);
+    }
+
+    # Parse other value types normally
     (val, err2) := parse_value(p);
     if (err2 != nil) {
         return (nil, err2);
@@ -940,6 +980,12 @@ parse_program(p: ref Parser): (ref Program, string)
                 return (nil, err);
             }
             prog.app = app;
+
+            # Check if we should use Draw backend (has onDraw property)
+            if (app.props != nil) {
+                if (has_property(app.props, "onDraw"))
+                    prog.window_type = 1;  # Draw backend
+            }
             break;  # Window is the last thing in the file
         }
         # Check for reactive function (identifier followed by ':')
@@ -1690,14 +1736,25 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
 
     buf += sys->sprint("implement %s;\n\n", cg.module_name);
 
+    # Determine backend
+    is_draw := 0;
+    if (prog.window_type == 1)
+        is_draw = 1;
+    cg.is_draw_backend = is_draw;
+
     # Build list of all modules (required + user imports)
     modules: list of ref Module = nil;
 
-    # Required modules for Kryon GUI apps
+    # Required modules
     modules = ref Module("sys", "sys", "Sys") :: modules;
     modules = ref Module("draw", "draw", "Draw") :: modules;
-    modules = ref Module("tk", "tk", "Tk") :: modules;
-    modules = ref Module("tkclient", "tkclient", "Tkclient") :: modules;
+
+    if (is_draw) {
+        modules = ref Module("wmclient", "wmclient", "Wmclient") :: modules;
+    } else {
+        modules = ref Module("tk", "tk", "Tk") :: modules;
+        modules = ref Module("tkclient", "tkclient", "Tkclient") :: modules;
+    }
 
     # Add user imports from use statements
     imports := prog.module_imports;
@@ -1739,6 +1796,13 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
         mods = tl mods;
     }
 
+    # Add Draw type imports for wmclient backend
+    if (is_draw) {
+        buf += "Display, Image, Point, Rect: import draw;\n";
+        buf += "Window: import wmclient;\n";
+        buf += "\n";
+    }
+
     # Generate module declaration
     buf += sys->sprint("%s: module\n{\n", cg.module_name);
     buf += "    init:\tfn(ctxt: ref Draw->Context, argv: list of string);\n";
@@ -1747,9 +1811,9 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     fd := prog.function_decls;
     while (fd != nil) {
         if (fd.return_type != nil && fd.return_type != "")
-            buf += sys->sprint("    %s: fn(): %s;\n", fd.name, fd.return_type);
+            buf += sys->sprint("    %s: fn(%s): %s;\n", fd.name, fd.params, fd.return_type);
         else
-            buf += sys->sprint("    %s: fn();\n", fd.name);
+            buf += sys->sprint("    %s: fn(%s);\n", fd.name, fd.params);
         fd = fd.next;
     }
 
@@ -1769,44 +1833,51 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
 
     while (fd != nil) {
         if (fd.return_type != nil && fd.return_type != "")
-            sys->fprint(cg.output, "\n%s(): %s\n", fd.name, fd.return_type);
+            sys->fprint(cg.output, "\n%s(%s): %s\n", fd.name, fd.params, fd.return_type);
         else
-            sys->fprint(cg.output, "\n%s()\n", fd.name);
+            sys->fprint(cg.output, "\n%s(%s)\n", fd.name, fd.params);
         sys->fprint(cg.output, "{\n");
 
         if (fd.body != nil && fd.body != "") {
-            # Start the first line with indentation
-            sys->fprint(cg.output, "    ");
-
-            # If function has a return type, add 'return' keyword
-            if (fd.return_type != nil && fd.return_type != "") {
-                sys->fprint(cg.output, "return ");
+            # Trim leading whitespace/newlines from body
+            body := fd.body;
+            while (len body > 0 && (body[0] == ' ' || body[0] == '\t' || body[0] == '\n' || body[0] == '\r')) {
+                body = body[1:];
             }
 
-            # Print body character by character to handle newlines correctly
-            # without mangling string literals or collapsing multiple newlines.
-            for (i := 0; i < len fd.body; i++) {
-                c := fd.body[i];
-                sys->fprint(cg.output, "%c", c);
+            # Split body by lines and process each line
+            (line_count, lines) := sys->tokenize(body, "\n");
+            # Convert list to array for indexing
+            if (lines != nil) {
+                # Build array from list
+                arr := array[line_count] of string;
+                tmp := lines;
+                for (j := 0; j < line_count; j++) {
+                    arr[j] = hd tmp;
+                    tmp = tl tmp;
+                }
 
-                # If we encounter a newline that isn't the very last char,
-                # add the indentation for the next line.
-                if (c == '\n' && i < (len fd.body - 1)) {
-                    sys->fprint(cg.output, "    ");
+                for (i := 0; i < line_count; i++) {
+                    line := arr[i];
+
+                    # Trim leading whitespace from line
+                    while (len line > 0 && (line[0] == ' ' || line[0] == '\t')) {
+                        line = line[1:];
+                    }
+
+                    # Trim trailing whitespace from line
+                    while (len line > 0 && (line[len line - 1] == ' ' || line[len line - 1] == '\t' || line[len line - 1] == '\r')) {
+                        line = line[0: len line - 1];
+                    }
+
+                    # Skip empty lines
+                    if (len line == 0)
+                        continue;
+
+                    # Indent the line
+                    sys->fprint(cg.output, "    %s\n", line);
                 }
             }
-
-            # If function has a return type, ensure body ends with semicolon
-            if (fd.return_type != nil && fd.return_type != "") {
-                last_char := fd.body[len fd.body - 1];
-                if (last_char != '\n' && last_char != ';') {
-                    sys->fprint(cg.output, ";");
-                }
-            }
-
-            # Ensure the block ends with a newline
-            if (fd.body[len fd.body - 1] != '\n')
-                sys->fprint(cg.output, "\n");
         }
 
         sys->fprint(cg.output, "}\n");
@@ -1885,9 +1956,215 @@ get_number_prop(props: ref Property, name: string): (int, int)
     return (0, 0);
 }
 
+# Check if widget has a specific property
+has_property(props: ref Property, name: string): int
+{
+    while (props != nil) {
+        if (props.name == name)
+            return 1;
+        props = props.next;
+    }
+    return 0;
+}
+
+# Parse reactive binding "fn_name@interval" -> (fn_name, interval)
+parse_reactive_binding(ident: string): (string, int)
+{
+    if (ident == nil)
+        return (nil, 0);
+
+    for (i := 0; i < len ident; i++) {
+        if (ident[i] == '@') {
+            fn_name := ident[0:i];
+            interval_str := ident[i+1:];
+            interval := 0;
+            if (interval_str != nil && len interval_str > 0) {
+                for (j := 0; j < len interval_str; j++) {
+                    c := interval_str[j];
+                    if (c >= '0' && c <= '9') {
+                        interval = interval * 10 + (c - '0');
+                    }
+                }
+            }
+            return (fn_name, interval);
+        }
+    }
+    return (ident, 0);
+}
+
+# Check if program should use Draw backend
+should_use_draw_backend(prog: ref Program): int
+{
+    if (prog == nil || prog.app == nil || prog.app.props == nil)
+        return 0;
+    return has_property(prog.app.props, "onDraw");
+}
+
+# Generate Draw/wmclient backend init
+generate_draw_init(cg: ref Codegen, prog: ref Program): string
+{
+    # Extract properties
+    ondraw_fn := "";
+    ondraw_interval := 0;
+    oninit_fn := "";
+    window_type := "Appl";
+
+    if (prog.app != nil && prog.app.props != nil) {
+        p := prog.app.props;
+        while (p != nil) {
+            if (p.name == "onDraw" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    (fname, interval) := parse_reactive_binding(ast->value_get_ident(p.value));
+                    ondraw_fn = fname;
+                    ondraw_interval = interval;
+                }
+            } else if (p.name == "onInit" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    oninit_fn = ast->value_get_ident(p.value);
+                }
+            } else if (p.name == "type" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    window_type = ast->value_get_ident(p.value);
+                }
+            }
+            p = p.next;
+        }
+    }
+
+    cg.ondraw_fn = ondraw_fn;
+    cg.ondraw_interval = ondraw_interval;
+    cg.oninit_fn = oninit_fn;
+
+    # Get window props
+    title := "Application";
+    width := 100;
+    height := 100;
+
+    if (prog.app != nil && prog.app.props != nil) {
+        t := get_string_prop(prog.app.props, "title");
+        if (t != nil)
+            title = t;
+        (w, ok) := get_number_prop(prog.app.props, "width");
+        if (ok)
+            width = w;
+        (h, ok2) := get_number_prop(prog.app.props, "height");
+        if (ok2)
+            height = h;
+    }
+
+    # ZP constant
+    sys->fprint(cg.output, "ZP := Point(0, 0);\n\n");
+
+    # timer function
+    sys->fprint(cg.output, "timer(c: chan of int, ms: int)\n");
+    sys->fprint(cg.output, "{\n");
+    sys->fprint(cg.output, "    for(;;){\n");
+    sys->fprint(cg.output, "        sys->sleep(ms);\n");
+    sys->fprint(cg.output, "        c <-= 1;\n");
+    sys->fprint(cg.output, "    }\n");
+    sys->fprint(cg.output, "}\n\n");
+
+    sys->fprint(cg.output, "init(ctxt: ref Draw->Context, nil: list of string)\n");
+    sys->fprint(cg.output, "{\n");
+    sys->fprint(cg.output, "    sys = load Sys Sys->PATH;\n");
+    sys->fprint(cg.output, "    draw = load Draw Draw->PATH;\n");
+    sys->fprint(cg.output, "    math = load Math Math->PATH;\n");
+
+    # Load user modules (skip built-in ones: sys, draw, math, wmclient)
+    imports := prog.module_imports;
+    while (imports != nil) {
+        module_name := imports.module_name;
+        # Skip built-in modules that are already loaded
+        if (module_name != "sys" && module_name != "draw" &&
+            module_name != "math" && module_name != "wmclient" &&
+            module_name != "tk" && module_name != "tkclient") {
+            alias := imports.alias;
+            if (alias == nil || alias == "")
+                alias = module_name;
+
+            type_name := alias;
+            if (len type_name > 0) {
+                first := type_name[0];
+                if (first >= 'a' && first <= 'z') {
+                    type_name = sys->sprint("%c", first - ('a' - 'A')) + type_name[1:];
+                }
+            }
+
+            sys->fprint(cg.output, "    %s = load %s %s->PATH;\n", alias, type_name, type_name);
+        }
+        imports = imports.next;
+    }
+
+    sys->fprint(cg.output, "    wmclient = load Wmclient Wmclient->PATH;\n");
+    sys->fprint(cg.output, "\n");
+    sys->fprint(cg.output, "    sys->pctl(Sys->NEWPGRP, nil);\n");
+    sys->fprint(cg.output, "    wmclient->init();\n");
+    sys->fprint(cg.output, "\n");
+    sys->fprint(cg.output, "    if(ctxt == nil)\n");
+    sys->fprint(cg.output, "        ctxt = wmclient->makedrawcontext();\n");
+    sys->fprint(cg.output, "\n");
+    sys->fprint(cg.output, "    w := wmclient->window(ctxt, \"%s\", Wmclient->%s);\n", title, window_type);
+    sys->fprint(cg.output, "    display := w.display;\n");
+    sys->fprint(cg.output, "\n");
+
+    if (oninit_fn != nil && oninit_fn != "") {
+        sys->fprint(cg.output, "    # Initialize colors\n");
+        sys->fprint(cg.output, "    %s(display);\n", oninit_fn);
+        sys->fprint(cg.output, "\n");
+    }
+
+    sys->fprint(cg.output, "    w.reshape(Rect((0, 0), (%d, %d)));\n", width, height);
+    sys->fprint(cg.output, "    w.onscreen(\"place\");\n");
+    sys->fprint(cg.output, "    w.startinput(\"ptr\" :: nil);\n");
+    sys->fprint(cg.output, "\n");
+
+    if (ondraw_fn != nil && ondraw_fn != "") {
+        sys->fprint(cg.output, "    now := daytime->now();\n");
+        sys->fprint(cg.output, "    %s(w.image, now);\n", ondraw_fn);
+        sys->fprint(cg.output, "\n");
+        sys->fprint(cg.output, "    ticks := chan of int;\n");
+        sys->fprint(cg.output, "    spawn timer(ticks, %d);\n", ondraw_interval);
+    }
+
+    # Event loop
+    sys->fprint(cg.output, "    for(;;){\n");
+    sys->fprint(cg.output, "        alt{\n");
+    sys->fprint(cg.output, "        ctl := <-w.ctl or\n");
+    sys->fprint(cg.output, "        ctl = <-w.ctxt.ctl =>\n");
+    sys->fprint(cg.output, "            w.wmctl(ctl);\n");
+    sys->fprint(cg.output, "            if(ctl != nil && ctl[0] == '!')\n");
+    if (ondraw_fn != nil && ondraw_fn != "") {
+        sys->fprint(cg.output, "                %s(w.image, now);\n", ondraw_fn);
+    } else {
+        sys->fprint(cg.output, "                ;\n");
+    }
+    sys->fprint(cg.output, "\n");
+    sys->fprint(cg.output, "        p := <-w.ctxt.ptr =>\n");
+    sys->fprint(cg.output, "            w.pointer(*p);\n");
+    sys->fprint(cg.output, "\n");
+
+    if (ondraw_fn != nil && ondraw_fn != "") {
+        sys->fprint(cg.output, "        <-ticks =>\n");
+        sys->fprint(cg.output, "            t := daytime->now();\n");
+        sys->fprint(cg.output, "            if(t != now){\n");
+        sys->fprint(cg.output, "                now = t;\n");
+        sys->fprint(cg.output, "                %s(w.image, now);\n", ondraw_fn);
+        sys->fprint(cg.output, "            }\n");
+    }
+
+    sys->fprint(cg.output, "        }\n");
+    sys->fprint(cg.output, "    }\n");
+    sys->fprint(cg.output, "}\n");
+
+    return nil;
+}
+
 # Generate init function
 generate_init(cg: ref Codegen, prog: ref Program): string
 {
+    if (cg.is_draw_backend)
+        return generate_draw_init(cg, prog);
+
     sys->fprint(cg.output, "init(ctxt: ref Draw->Context, argv: list of string)\n");
     sys->fprint(cg.output, "{\n");
 
@@ -2194,6 +2471,7 @@ generate(output: string, prog: ref Program, module_name: string): string
         return sys->sprint("cannot create output file: %s", output);
 
     cg := Codegen.create(fd, module_name);
+    cg.is_draw_backend = should_use_draw_backend(prog);
 
     # Generate code in correct order:
     # 1. Prologue (includes, module declaration)
@@ -2218,23 +2496,26 @@ generate(output: string, prog: ref Program, module_name: string): string
         return err;
     }
 
-    err = generate_reactive_vars(cg, prog);
-    if (err != nil) {
-        fd = nil;
-        return err;
-    }
+    # Only for Tk backend
+    if (!cg.is_draw_backend) {
+        err = generate_reactive_vars(cg, prog);
+        if (err != nil) {
+            fd = nil;
+            return err;
+        }
 
-    # Collect widget commands to populate reactive_bindings
-    err = collect_widget_commands(cg, prog);
-    if (err != nil) {
-        fd = nil;
-        return err;
-    }
+        # Collect widget commands to populate reactive_bindings
+        err = collect_widget_commands(cg, prog);
+        if (err != nil) {
+            fd = nil;
+            return err;
+        }
 
-    err = generate_tkcmds_array(cg, prog);
-    if (err != nil) {
-        fd = nil;
-        return err;
+        err = generate_tkcmds_array(cg, prog);
+        if (err != nil) {
+            fd = nil;
+            return err;
+        }
     }
 
     err = generate_init(cg, prog);
@@ -2243,18 +2524,21 @@ generate(output: string, prog: ref Program, module_name: string): string
         return err;
     }
 
-    # Generate reactive update functions after init
-    err = generate_reactive_funcs(cg, prog);
-    if (err != nil) {
-        fd = nil;
-        return err;
-    }
+    # Only for Tk backend
+    if (!cg.is_draw_backend) {
+        # Generate reactive update functions after init
+        err = generate_reactive_funcs(cg, prog);
+        if (err != nil) {
+            fd = nil;
+            return err;
+        }
 
-    # Generate timer function
-    err = generate_reactive_timer(cg, prog);
-    if (err != nil) {
-        fd = nil;
-        return err;
+        # Generate timer function
+        err = generate_reactive_timer(cg, prog);
+        if (err != nil) {
+            fd = nil;
+            return err;
+        }
     }
 
     # Generate user code blocks last

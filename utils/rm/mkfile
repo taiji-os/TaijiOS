@@ -21,4 +21,4 @@ rm-Posix.c rm-Inferno.c:QV:
 	exit 1
 
 $BIN/rm.exe:	$O.out
-	rm -f $target && cp $prereq $target
+	mkdir -p $BIN && rm -f $target && cp $prereq $target

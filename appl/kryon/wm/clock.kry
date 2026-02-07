@@ -1,0 +1,45 @@
+use daytime
+use math
+
+fn initColors(display: ref Display) {
+    back = display.colormix(Draw->Palebluegreen, Draw->White);
+    hrhand = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Darkblue);
+    minhand = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Paleblue);
+    dots = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Blue);
+}
+
+fn circlept(c: Point, r: int, degrees: int): Point {
+    rad = real degrees * Math->Pi / 180.0;
+    c.x += int (math->cos(rad) * real r);
+    c.y -= int (math->sin(rad) * real r);
+    return c;
+}
+
+fn drawClock(screen: ref Image, t: int) {
+    if (screen == nil) { return; }
+    tms = daytime->local(t);
+    anghr = 90 - (tms.hour * 5 + tms.min / 10) * 6;
+    angmin = 90 - tms.min * 6;
+    r = screen.r;
+    c = r.min.add(r.max).div(2);
+    if (r.dx() < r.dy()) { rad = r.dx(); } else { rad = r.dy(); }
+    rad /= 2;
+    rad -= 8;
+    screen.draw(screen.r, back, nil, ZP);
+    for (i = 0; i < 12; i++) {
+        screen.fillellipse(circlept(c, rad, i * (360/12)), 2, 2, dots, ZP);
+    }
+    screen.line(c, circlept(c, (rad*3)/4, angmin), 0, 0, 1, minhand, ZP);
+    screen.line(c, circlept(c, rad/2, anghr), 0, 0, 1, hrhand, ZP);
+    screen.flush(Draw->Flushnow);
+}
+
+Window {
+    title = "Clock"
+    width = 100
+    height = 100
+    type = Appl
+
+    onInit = initColors
+    onDraw = drawClock @ 30000
+}

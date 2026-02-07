@@ -37,4 +37,4 @@ clean-std:V:
 	rm -f *.[$OS] [$OS].out
 
 $BIN/%:	$O.out
-	rm -f $BIN/$stem && cp $O.out $BIN/$stem
+	mkdir -p $BIN && rm -f $BIN/$stem && cp $O.out $BIN/$stem

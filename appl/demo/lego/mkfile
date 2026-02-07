@@ -6,7 +6,6 @@ TARG=\
 		legolink.dis\
 		rcxsend.dis\
 		timers.dis\
-		styx.srec\
 
 SHTARG=\
 		clockreg.sh\
@@ -25,7 +24,7 @@ DISBIN=$ROOT/dis/demo/lego
 <$ROOT/mkfiles/mkdis
 
 $DISBIN/%.srec:	%.srec
-	rm -f $target && cp $stem.srec $target
+	mkdir -p $DISBIN && rm -f $target && cp $stem.srec $target
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES

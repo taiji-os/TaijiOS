@@ -34,7 +34,7 @@ nuke-std:V:	clean-std
 	rm -f y.tab.? y.debug y.output
 
 $BIN/%:	$O.%
-	rm -f $BIN/$stem && cp $O.$stem $BIN/$stem
+	mkdir -p $BIN && rm -f $BIN/$stem && cp $O.$stem $BIN/$stem
 
 tests:V:
 	for (i in $PROGS){

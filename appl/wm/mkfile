@@ -17,13 +17,13 @@ install:V:	install-$SHELLTYPE
 
 install-rc install-nt:V:	all
 	for(i in *.dis){
-		cp $i $DISBIN/$i
+		mkdir -p $DISBIN && cp $i $DISBIN/$i
 	}
 
 install-sh:V:	all
 	for i in *.dis
 	do
-		cp $i $DISBIN/$i
+		mkdir -p $DISBIN && cp $i $DISBIN/$i
 	done
 
 clean:V:

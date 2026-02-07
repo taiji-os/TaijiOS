@@ -2,8 +2,6 @@
 
 TARG=\
 		camera.dis\
-		camload.bit\
-		camproc.bit\
 		tkinterface.dis\
 
 SHTARG=\
@@ -29,9 +27,6 @@ SYSMODULES= \
 DISBIN=$ROOT/dis/demo/camera
 
 <$ROOT/mkfiles/mkdis
-
-$DISBIN/%.bit:		%.bit
-	rm -f $target && cp $stem.bit $target
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES
