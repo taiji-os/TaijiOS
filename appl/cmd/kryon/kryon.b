@@ -19,7 +19,7 @@ include "lexer.m";
     lexer: Lexer;
 
 # Import useful types from ast
-Program, Widget, Property, Value, ReactiveFunction, ModuleImport: import ast;
+Program, Widget, Property, Value, ReactiveFunction, ModuleImport, SymbolTable: import ast;
 
 # Import useful types from lexer
 LexerObj, Token: import lexer;
@@ -124,7 +124,7 @@ should_add_space(curr_toktype: int, next_toktype: int): int
         next_toktype == ':' || next_toktype == '[')
         return 0;
 
-    # No space around the arrow operator (critical fix)
+    # No space around the arrow operator
     if (curr_toktype == Lexer->TOKEN_ARROW || next_toktype == Lexer->TOKEN_ARROW)
         return 0;
 
@@ -136,8 +136,23 @@ should_add_space(curr_toktype: int, next_toktype: int): int
     if (curr_toktype == '.')
         return 0;
 
+    # No space around compound operators (+=, -=, ==, !=, <=, >=, ++, --, *=, /=, %=)
+    if (is_compound_operator(curr_toktype) || is_compound_operator(next_toktype))
+        return 0;
+
     # Default: add space for keywords and identifiers
     return 1;
+}
+
+# Check if token type is a compound operator
+is_compound_operator(toktype: int): int
+{
+    if (toktype == '+' + 256 || toktype == '-' + 256 || toktype == '=' + 256 ||
+        toktype == '!' + 256 || toktype == '<' + 256 || toktype == '>' + 256 ||
+        toktype == '+' + 512 || toktype == '-' + 512 ||
+        toktype == '*' + 256 || toktype == '/' + 256 || toktype == '%' + 256)
+        return 1;
+    return 0;
 }
 
 # Parse a use statement: use module_name [alias]
@@ -274,7 +289,53 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
 
     name := name_tok.string_val;
 
-    # Expect '='
+    # Check for ':' (typed declaration) or '=' (initializer)
+    next_tok := p.peek();
+    if (next_tok.toktype == ':') {
+        # Typed declaration: var name: type
+        p.next();  # consume ':'
+
+        # Parse type (could be "ref Image", "int", "string", "chan of int", etc.)
+        # Stop at semicolon or any keyword (fn, var, Window, etc.)
+        type_str := "";
+        while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+               p.peek().toktype != ';') {
+            tok := p.peek();
+            # Stop if we hit a keyword (these signal end of type declaration)
+            if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_CENTER)
+                break;
+            if (tok.toktype == Lexer->TOKEN_AT || tok.toktype == Lexer->TOKEN_ARROW)
+                break;
+
+            p.next();  # consume the token
+            if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                type_str += tok.string_val;
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                type_str += sys->sprint("%c", tok.toktype);
+            }
+            # Add space between tokens if needed
+            if (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+                p.peek().toktype != ';') {
+                peek_tok := p.peek();
+                # Stop at keywords
+                if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CENTER)
+                    break;
+                if (peek_tok.toktype == Lexer->TOKEN_AT || peek_tok.toktype == Lexer->TOKEN_ARROW)
+                    break;
+                if (should_add_space(tok.toktype, peek_tok.toktype))
+                    type_str += " ";
+            }
+        }
+
+        # Optional ';'
+        if (p.peek().toktype == ';')
+            p.next();  # consume ';'
+
+        # No initialization expression for typed declarations (value set in functions)
+        return (ast->var_decl_create(name, type_str, "", nil), nil);
+    }
+
+    # Expect '=' (initializer style: var name = expr)
     (eq_tok, err) := p.expect('=');
     if (err != nil)
         return (nil, err);
@@ -426,32 +487,76 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
     if (err3 != nil)
         return (nil, err3);
 
-    # Parse function body by reading directly from source
-    # We're already past the opening '{', so read from current position
-    start_pos := p.l.pos;
+    # Parse function body using token-based parsing
+    # This avoids manual position manipulation that breaks lexer state
+    body := "";
     brace_count := 1;
+    while (brace_count > 0) {
+        tok := p.next();
+        if (tok.toktype == Lexer->TOKEN_ENDINPUT) {
+            return (nil, fmt_error(p, "unterminated function body"));
+        }
 
-    while (brace_count > 0 && p.l.pos < len p.l.src_data) {
-        c := p.l.src_data[p.l.pos];
-        p.l.pos++;
+        # Add token to body string
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            body += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            body += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            body += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            body += "->";
+        } else if (tok.toktype == '+' + 256) {
+            body += "+=";
+        } else if (tok.toktype == '-' + 256) {
+            body += "-=";
+        } else if (tok.toktype == '=' + 256) {
+            body += "==";
+        } else if (tok.toktype == '!' + 256) {
+            body += "!=";
+        } else if (tok.toktype == '<' + 256) {
+            body += "<=";
+        } else if (tok.toktype == '>' + 256) {
+            body += ">=";
+        } else if (tok.toktype == '+' + 512) {
+            body += "++";
+        } else if (tok.toktype == '-' + 512) {
+            body += "--";
+        } else if (tok.toktype == '*' + 256) {
+            body += "*=";
+        } else if (tok.toktype == '/' + 256) {
+            body += "/=";
+        } else if (tok.toktype == '%' + 256) {
+            body += "%=";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            body += sys->sprint("%c", tok.toktype);
+        }
 
-        if (c == '{')
+        # Track braces
+        if (tok.toktype == '{') {
             brace_count++;
-        else if (c == '}')
+        } else if (tok.toktype == '}') {
             brace_count--;
-        else if (c == '\n') {
-            p.l.lineno++;
-            p.l.column = 0;
-        } else if (c != '\r') {
-            p.l.column++;
+        }
+
+        # Add space between tokens if needed (look ahead)
+        if (brace_count > 0) {
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != '}' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                body += " ";
+            }
         }
     }
 
-    # Extract body (excluding the closing brace)
-    body := p.l.src_data[start_pos : p.l.pos - 1];
-
-    # Reset peek token since we modified position
+    # Clear peek buffer to ensure clean parser state
+    # We've consumed the closing }, so reset any peeked token
     p.has_peek = 0;
+
+    # body now includes the closing brace, so remove it
+    if (len body > 0 && body[len body - 1] == '}')
+        body = body[0: len body - 1];
 
     fn_decl := ast->functiondecl_create(name, body);
     fn_decl.params = params;
@@ -517,10 +622,30 @@ parse_property(p: ref Parser): (ref Property, string)
     }
 
     # Check for reactive syntax: identifier @ number
+    # But first check if it's an identifier followed by () (function call)
     if (p.peek().toktype == Lexer->TOKEN_IDENTIFIER) {
+        # Peek ahead to see what comes after the identifier
+        # We need to look at: identifier, then @ or (
+        # But we haven't consumed the identifier yet
+        # So we peek at identifier, then peek again to check next token
+
+        # Consume the identifier
         id_tok := p.next();
         id_name := id_tok.string_val;
 
+        # Check if next is '(' (function call)
+        if (p.peek().toktype == '(') {
+            p.next();  # consume '('
+            (close_paren, err) := p.expect(')');
+            if (err != nil) {
+                return (nil, err);
+            }
+            prop := ast->property_create(name);
+            prop.value = ast->value_create_fn_call(id_name);
+            return (prop, nil);
+        }
+
+        # Check for @ reactive syntax
         if (p.peek().toktype == Lexer->TOKEN_AT) {
             p.next();  # consume @
             num_tok := p.next();
@@ -533,7 +658,7 @@ parse_property(p: ref Parser): (ref Property, string)
             return (prop, nil);
         }
 
-        # Just identifier, no @
+        # Just identifier, no @ or ()
         prop := ast->property_create(name);
         prop.value = ast->value_create_ident(id_name);
         return (prop, nil);
@@ -1005,7 +1130,322 @@ parse_program(p: ref Parser): (ref Program, string)
         }
     }
 
+    # Check for undefined variables
+    parse_err: string;
+    parse_err = check_undefined_variables(prog);
+    if (parse_err != nil)
+        return (nil, parse_err);
+
     return (prog, nil);
+}
+
+# =========================================================================
+# Variable validation functions
+# =========================================================================
+
+# Built-in Limbo keywords and types that should be excluded from validation
+is_builtin_keyword(s: string): int
+{
+    if (s == "if") return 1;
+    if (s == "else") return 1;
+    if (s == "for") return 1;
+    if (s == "while") return 1;
+    if (s == "return") return 1;
+    if (s == "nil") return 1;
+    if (s == "int") return 1;
+    if (s == "real") return 1;
+    if (s == "string") return 1;
+    if (s == "ref") return 1;
+    if (s == "array") return 1;
+    if (s == "list") return 1;
+    if (s == "chan") return 1;
+    if (s == "of") return 1;
+    if (s == "do") return 1;
+    if (s == "case") return 1;
+    if (s == "pick") return 1;
+    if (s == "con") return 1;
+    if (s == "adt") return 1;
+    if (s == "fn") return 1;
+    if (s == "impl") return 1;
+    if (s == "include") return 1;
+    if (s == "import") return 1;
+    if (s == "type") return 1;
+    if (s == "break") return 1;
+    if (s == "continue") return 1;
+    if (s == "alt") return 1;
+    if (s == "load") return 1;
+    if (s == "raise") return 1;
+    if (s == "spawn") return 1;
+    if (s == "exit") return 1;
+    return 0;
+}
+
+# Common standard library modules that should be excluded
+is_stdlib_module(s: string): int
+{
+    if (s == "sys") return 1;
+    if (s == "draw") return 1;
+    if (s == "math") return 1;
+    if (s == "daytime") return 1;
+    if (s == "wmclient") return 1;
+    if (s == "tk") return 1;
+    if (s == "bufio") return 1;
+    if (s == "bufio") return 1;
+    if (s == "sh") return 1;
+    if (s == "iostream") return 1;
+    if (s == "stringmod") return 1;
+    if (s == "rand") return 1;
+    if (s == "keyring") return 1;
+    if (s == "security") return 1;
+    return 0;
+}
+
+# Extract parameter names from a parameter string like "c: Point, r: int, degrees: int"
+extract_param_names(params: string): list of string
+{
+    names: list of string = nil;
+
+    if (params == nil || len params == 0)
+        return names;
+
+    # Simple parser: split by ',', then take identifier before ':'
+    i := 0;
+    while (i < len params) {
+        # Skip whitespace
+        while (i < len params && (params[i] == ' ' || params[i] == '\t'))
+            i++;
+
+        if (i >= len params)
+            break;
+
+        # Read identifier name
+        start := i;
+        while (i < len params && ((params[i] >= 'a' && params[i] <= 'z') ||
+               (params[i] >= 'A' && params[i] <= 'Z') ||
+               (params[i] >= '0' && params[i] <= '9') ||
+               params[i] == '_')) {
+            i++;
+        }
+
+        if (i > start) {
+            name := params[start:i];
+            # Skip to comma or end
+            while (i < len params && params[i] != ',')
+                i++;
+            if (i < len params && params[i] == ',')
+                i++;
+            names = name :: names;
+        } else {
+            # Skip to comma or end
+            while (i < len params && params[i] != ',')
+                i++;
+            if (i < len params && params[i] == ',')
+                i++;
+        }
+    }
+
+    # Reverse to get original order
+    result: list of string = nil;
+    for (l := names; l != nil; l = tl l)
+        result = hd l :: result;
+
+    return result;
+}
+
+# Scan a function body string for local var declarations
+# Returns list of local variable names
+extract_local_vars(body: string): list of string
+{
+    locals: list of string = nil;
+
+    if (body == nil || len body == 0)
+        return locals;
+
+    # Create a lexer to scan the body
+    l := lexer->create("<function>", body);
+
+    while (1) {
+        tok := lexer->lex(l);
+        if (tok.toktype == Lexer->TOKEN_ENDINPUT)
+            break;
+
+        # Look for 'var' keyword followed by identifier
+        if (tok.toktype == Lexer->TOKEN_VAR) {
+            # Next token should be the variable name
+            name_tok := lexer->lex(l);
+            if (name_tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                # Check if it's a type annotation (var name: type) or assignment (var name =)
+                # Either way, the first identifier after 'var' is the variable name
+                varname := name_tok.string_val;
+
+                # Add to locals (avoid duplicates)
+                found := 0;
+                for (l2 := locals; l2 != nil; l2 = tl l2) {
+                    if (hd l2 == varname) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = varname :: locals;
+            }
+        }
+    }
+
+    return locals;
+}
+
+# Check all identifiers in a function body against the symbol table
+# Returns error string if undefined variable found, nil otherwise
+check_function_body(body: string, st: ref Ast->SymbolTable, fn_name: string): string
+{
+    if (body == nil || len body == 0)
+        return nil;
+
+    # Create a lexer to scan the body
+    lex := lexer->create("<function>", body);
+
+    prev_tok: ref Token;
+    prev_tok = nil;
+
+    while (1) {
+        tok := lexer->lex(lex);
+        if (tok.toktype == Lexer->TOKEN_ENDINPUT)
+            break;
+
+        # Check identifiers
+        if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            name := tok.string_val;
+
+            # Skip built-in keywords
+            if (is_builtin_keyword(name))
+                continue;
+
+            # Skip standard library modules
+            if (is_stdlib_module(name))
+                continue;
+
+            # Skip if previous token was . or -> (method/member access)
+            if (prev_tok != nil) {
+                if (prev_tok.toktype == '.' ||
+                    prev_tok.toktype == Lexer->TOKEN_ARROW) {
+                    # This is a method/member name, not a variable
+                    # Update prev_tok and continue
+                    prev_tok = tok;
+                    continue;
+                }
+            }
+
+            # Peek at next token to check for method calls (obj.method or obj->method)
+            # If next token is -> or ., this is the object, which we DO want to check
+            peek_tok := lexer->peek_token(lex);
+
+            # Skip uppercase identifiers that are likely type names
+            # (unless they're explicitly in the symbol table)
+            if (len name > 0 && name[0] >= 'A' && name[0] <= 'Z') {
+                # Only check if it's in the symbol table
+                if (!ast->symboltable_has_var(st, name))
+                    prev_tok = tok;
+                    continue;
+            }
+
+            # Check if variable is defined
+            if (!ast->symboltable_has_var(st, name)) {
+                return sys->sprint("undefined variable '%s' in function '%s' at line %d",
+                    name, fn_name, tok.lineno);
+            }
+        }
+
+        # Update previous token
+        prev_tok = tok;
+    }
+
+    return nil;
+}
+
+# Main validation function - checks all function bodies for undefined variables
+check_undefined_variables(prog: ref Program): string
+{
+    if (prog == nil)
+        return nil;
+
+    # Build symbol table for module-level variables
+    st := ast->symboltable_create();
+
+    # Add module imports
+    imp := prog.module_imports;
+    while (imp != nil) {
+        # Add the module name (e.g., "math" from "use math")
+        ast->symboltable_add_import(st, imp.module_name);
+
+        # Also add common aliases if present
+        if (imp.alias != nil && len imp.alias > 0)
+            ast->symboltable_add_import(st, imp.alias);
+
+        imp = imp.next;
+    }
+
+    # Add common standard library modules by default (often used without explicit use)
+    ast->symboltable_add_import(st, "sys");
+    ast->symboltable_add_import(st, "draw");
+    ast->symboltable_add_import(st, "math");
+    ast->symboltable_add_import(st, "daytime");
+    ast->symboltable_add_import(st, "wmclient");
+    ast->symboltable_add_import(st, "tk");
+
+    # Add Draw constants and functions (accessed via Draw->)
+    ast->symboltable_add_import(st, "Draw");
+    ast->symboltable_add_import(st, "Math");
+
+    # Add module-level variables
+    v := prog.vars;
+    while (v != nil) {
+        ast->symboltable_add_module_var(st, v.name);
+        v = v.next;
+    }
+
+    # Check each function
+    fd := prog.function_decls;
+    while (fd != nil) {
+        # Create function-specific symbol table
+        fn_st := ast->symboltable_create();
+
+        # Copy module-level vars and imports
+        fn_st.module_vars = st.module_vars;
+        fn_st.imports = st.imports;
+
+        # Copy module-level variables to function symbol table
+        fn_st.module_vars = st.module_vars;
+
+        # Add function parameters
+        param_names := extract_param_names(fd.params);
+        {
+        l := param_names;
+        while (l != nil) {
+            ast->symboltable_add_param(fn_st, hd l);
+            l = tl l;
+        }
+        }
+
+        # Add local variables from function body
+        locals := extract_local_vars(fd.body);
+        {
+        l := locals;
+        while (l != nil) {
+            ast->symboltable_add_var(fn_st, hd l);
+            l = tl l;
+        }
+        }
+
+        # Check the function body
+        err := check_function_body(fd.body, fn_st, fd.name);
+        if (err != nil)
+            return err;
+
+        fd = fd.next;
+    }
+
+    return nil;
 }
 
 # =========================================================================
@@ -1472,7 +1912,10 @@ generate_var_decls(cg: ref Codegen, prog: ref Program): string
     vds := prog.vars;
 
     while (vds != nil) {
-        sys->fprint(cg.output, "%s: string;\n", vds.name);
+        var_type := vds.typ;
+        if (var_type == nil || var_type == "")
+            var_type = "string";  # default fallback
+        sys->fprint(cg.output, "%s: %s;\n", vds.name, var_type);
         vds = vds.next;
     }
 
@@ -1729,6 +2172,17 @@ generate_module_loads(cg: ref Codegen, prog: ref Program): string
     return nil;
 }
 
+# Check if module name is already in module list
+module_list_contains(mods: list of ref Module, name: string): int
+{
+    while (mods != nil) {
+        if ((hd mods).mod_file == name)
+            return 1;
+        mods = tl mods;
+    }
+    return 0;
+}
+
 # Generate prologue
 generate_prologue(cg: ref Codegen, prog: ref Program): string
 {
@@ -1745,37 +2199,38 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     # Build list of all modules (required + user imports)
     modules: list of ref Module = nil;
 
-    # Required modules
+    # Required modules - added in reverse order (after reversal, these come last)
     modules = ref Module("sys", "sys", "Sys") :: modules;
     modules = ref Module("draw", "draw", "Draw") :: modules;
 
     if (is_draw) {
+        # tk must come before wmclient - add wmclient first (it goes to front)
         modules = ref Module("wmclient", "wmclient", "Wmclient") :: modules;
-    } else {
         modules = ref Module("tk", "tk", "Tk") :: modules;
+    } else {
         modules = ref Module("tkclient", "tkclient", "Tkclient") :: modules;
+        modules = ref Module("tk", "tk", "Tk") :: modules;
     }
 
-    # Add user imports from use statements
+    # Add user imports, skip duplicates
     imports := prog.module_imports;
     while (imports != nil) {
         module_name := imports.module_name;
-        alias := imports.alias;
+        if (!module_list_contains(modules, module_name)) {
+            alias := imports.alias;
+            if (alias == nil || alias == "")
+                alias = module_name;
 
-        if (alias == nil || alias == "") {
-            alias = module_name;
-        }
-
-        # Capitalize first letter for type name
-        type_name := alias;
-        if (len type_name > 0) {
-            first := type_name[0];
-            if (first >= 'a' && first <= 'z') {
-                type_name = sys->sprint("%c", first - ('a' - 'A')) + type_name[1:];
+            type_name := alias;
+            if (len type_name > 0) {
+                first := type_name[0];
+                if (first >= 'a' && first <= 'z') {
+                    type_name = sys->sprint("%c", first - ('a' - 'A')) + type_name[1:];
+                }
             }
-        }
 
-        modules = ref Module(module_name, alias, type_name) :: modules;
+            modules = ref Module(module_name, alias, type_name) :: modules;
+        }
         imports = imports.next;
     }
 

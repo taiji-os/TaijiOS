@@ -1,0 +1,24 @@
+<$ROOT/mkconfig
+
+KRYFILES=\
+	clock.kry\
+	date.kry\
+
+BFILES=${KRYFILES:%.kry=%.b}
+
+DISFILES=${KRYFILES:%.kry=%.dis}
+
+all:V:	$BFILES $DISFILES
+
+%.b:	%.kry
+	/dis/kryon.dis $stem.kry
+
+%.dis:	%.b
+	limbo -g $stem.b
+
+clean:V:
+	rm -f $BFILES $DISFILES
+
+install:V: all
+
+nuke:V: clean

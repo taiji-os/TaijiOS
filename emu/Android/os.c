@@ -325,24 +325,27 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Simple tests only - skip Tk modules for now */
+	/* Testing Tk modules to trigger crash for debugging */
 	static const char* test_modules[] = {
-		"dis/testsimple.dis",  /* Simple test that just prints */
-		"dis/testprint.dis",   /* Test printing */
-		"dis/testsleep.dis",   /* Test sleep */
-		"dis/testload.dis",    /* Minimal Draw module test */
-		"dis/testnobox.dis",
-		"dis/testwm.dis",
-		/* TODO: Fix Tk module loading before enabling these */
-		/* "dis/minimal.dis", */
-		/* "dis/clock.dis", */
+		/* "dis/testsimple.dis",  Simple test that just prints */
+		/* "dis/testprint.dis",   Test printing */
+		/* "dis/testsleep.dis",   Test sleep */
+		/* "dis/testload.dis",    Minimal Draw module test */
+		/* "dis/testnobox.dis", */
+		/* "dis/testwm.dis", */
+		/* Testing Tk modules - these should trigger the crash */
+		"dis/minimal.dis",      /* Minimal Tk module */
+		"dis/clock.dis",        /* Clock application - complex Tk */
 		NULL
 	};
 
 	loaded_prog = NULL;
 	LOGI("emuinit: About to load Dis modules");
+	LOGI("emuinit: test_modules[0]=%s", test_modules[0]);
+	LOGI("emuinit: test_modules[1]=%s", test_modules[1] ? test_modules[1] : "(null)");
 	for (int i = 0; test_modules[i] != NULL && !loaded_prog; i++) {
 		int size;
+		LOGI("emuinit: Attempting to load %s (i=%d)", test_modules[i], i);
 		uchar* code = load_dis_from_assets(test_modules[i], &size);
 		if (code) {
 			LOGI("emuinit: Loading %s from assets", test_modules[i]);

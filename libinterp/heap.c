@@ -4,6 +4,13 @@
 #include "pool.h"
 #include "raise.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define HEAP_DEBUG(...) __android_log_print(ANDROID_LOG_ERROR, "initmem-debug", __VA_ARGS__)
+#else
+#define HEAP_DEBUG(...)
+#endif
+
 void	freearray(Heap*, int);
 void	freelist(Heap*, int);
 void	freemodlink(Heap*, int);
@@ -341,20 +348,25 @@ initmem(Type *t, void *vw)
 	w = (WORD**)vw;
 	p = t->map;
 	ep = p + t->np;
+
+	HEAP_DEBUG("initmem: t=%p vw=%p t->size=%d t->np=%d", t, vw, t->size, t->np);
+
+	int slot = 0;
 	while(p < ep) {
 		c = *p;
 		if(c != 0) {
- 			if(BIT(c, 0)) w[7] = H;
-			if(BIT(c, 1)) w[6] = H;
-			if(BIT(c, 2)) w[5] = H;
-			if(BIT(c, 3)) w[4] = H;
-			if(BIT(c, 4)) w[3] = H;
-			if(BIT(c, 5)) w[2] = H;
-			if(BIT(c, 6)) w[1] = H;
-			if(BIT(c, 7)) w[0] = H;
+ 			if(BIT(c, 0)) { w[7] = H; HEAP_DEBUG("  init slot[%d]=H", slot+7); }
+			if(BIT(c, 1)) { w[6] = H; HEAP_DEBUG("  init slot[%d]=H", slot+6); }
+			if(BIT(c, 2)) { w[5] = H; HEAP_DEBUG("  init slot[%d]=H", slot+5); }
+			if(BIT(c, 3)) { w[4] = H; HEAP_DEBUG("  init slot[%d]=H", slot+4); }
+			if(BIT(c, 4)) { w[3] = H; HEAP_DEBUG("  init slot[%d]=H", slot+3); }
+			if(BIT(c, 5)) { w[2] = H; HEAP_DEBUG("  init slot[%d]=H", slot+2); }
+			if(BIT(c, 6)) { w[1] = H; HEAP_DEBUG("  init slot[%d]=H", slot+1); }
+			if(BIT(c, 7)) { w[0] = H; HEAP_DEBUG("  init slot[%d]=H", slot+0); }
 		}
 		p++;
 		w += 8;
+		slot += 8;
 	}
 }
 

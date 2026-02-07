@@ -151,6 +151,14 @@ Ast: module
         next: ref ModuleImport;
     };
 
+    # Symbol table for tracking variables in scope during validation
+    SymbolTable: adt {
+        vars: list of string;        # Local variables
+        module_vars: list of string; # Module-level vars
+        params: list of string;      # Function parameters
+        imports: list of string;     # Module imports (known identifiers)
+    };
+
     # Program ADT (root node)
     Program: adt {
         vars: ref VarDecl;
@@ -182,6 +190,14 @@ Ast: module
     # Module import functions
     moduleimport_create: fn(module_name: string, alias: string): ref ModuleImport;
     moduleimport_list_add: fn(head: ref ModuleImport, imp: ref ModuleImport): ref ModuleImport;
+
+    # Symbol table functions for variable validation
+    symboltable_create: fn(): ref SymbolTable;
+    symboltable_add_var: fn(st: ref SymbolTable, name: string);
+    symboltable_has_var: fn(st: ref SymbolTable, name: string): int;
+    symboltable_add_module_var: fn(st: ref SymbolTable, name: string);
+    symboltable_add_param: fn(st: ref SymbolTable, name: string);
+    symboltable_add_import: fn(st: ref SymbolTable, name: string);
 
     # Watch variable functions
     watchvar_create: fn(name: string): ref WatchVar;

@@ -408,3 +408,110 @@ functiondecl_list_add(head: ref FunctionDecl, fn_decl: ref FunctionDecl): ref Fu
     f.next = fn_decl;
     return head;
 }
+
+# Symbol table helper functions for variable validation
+
+symboltable_create(): ref SymbolTable
+{
+    return ref SymbolTable (nil, nil, nil, nil);
+}
+
+symboltable_add_var(st: ref SymbolTable, name: string)
+{
+    if (st == nil || name == nil)
+        return;
+
+    # Check if already in list to avoid duplicates
+    for (l := st.vars; l != nil; l = tl l) {
+        if (hd l == name)
+            return;
+    }
+    st.vars = name :: st.vars;
+}
+
+symboltable_add_module_var(st: ref SymbolTable, name: string)
+{
+    if (st == nil || name == nil)
+        return;
+
+    # Check if already in list to avoid duplicates
+    for (l := st.module_vars; l != nil; l = tl l) {
+        if (hd l == name)
+            return;
+    }
+    st.module_vars = name :: st.module_vars;
+}
+
+symboltable_add_param(st: ref SymbolTable, name: string)
+{
+    if (st == nil || name == nil)
+        return;
+
+    # Check if already in list to avoid duplicates
+    for (l := st.params; l != nil; l = tl l) {
+        if (hd l == name)
+            return;
+    }
+    st.params = name :: st.params;
+}
+
+symboltable_add_import(st: ref SymbolTable, name: string)
+{
+    if (st == nil || name == nil)
+        return;
+
+    # Check if already in list to avoid duplicates
+    for (l := st.imports; l != nil; l = tl l) {
+        if (hd l == name)
+            return;
+    }
+    st.imports = name :: st.imports;
+}
+
+symboltable_has_var(st: ref SymbolTable, name: string): int
+{
+    if (st == nil || name == nil)
+        return 0;
+
+    # Check local variables
+    {
+    l := st.vars;
+    while (l != nil) {
+        if (hd l == name)
+            return 1;
+        l = tl l;
+    }
+    }
+
+    # Check function parameters
+    {
+    l := st.params;
+    while (l != nil) {
+        if (hd l == name)
+            return 1;
+        l = tl l;
+    }
+    }
+
+    # Check module-level variables
+    {
+    l := st.module_vars;
+    while (l != nil) {
+        if (hd l == name)
+            return 1;
+        l = tl l;
+    }
+    }
+
+    # Check imports
+    {
+    l := st.imports;
+    while (l != nil) {
+        if (hd l == name)
+            return 1;
+        l = tl l;
+    }
+    }
+
+    return 0;
+}

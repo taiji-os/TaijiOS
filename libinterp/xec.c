@@ -5,6 +5,13 @@
 #include "kernel.h"
 #include "pool.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define MOV_DEBUG(...) __android_log_print(ANDROID_LOG_ERROR, "movp-debug", __VA_ARGS__)
+#else
+#define MOV_DEBUG(...) print(__VA_ARGS__)
+#endif
+
 static int debug = 0;
 
 REG	R;			/* Virtual Machine registers */
@@ -296,6 +303,14 @@ OP(movp)
 		h->ref++;
 		Setmark(h);
 	}
+
+	/* DEBUG: Check for dangerous pointer values before dereferencing */
+	if((uintptr)R.d < 0x1000) {
+		MOV_DEBUG("CRASH IMPENDING: R.d=%p R.s=%p R.FP=%p R.PC->d.i.f=%d R.PC->d.i.s=%d R.PC->op=0x%x",
+			R.d, R.s, R.FP, R.PC->d.i.f, R.PC->d.i.s, R.PC->op);
+		MOV_DEBUG("  R.MP=%p R.M=%p R.PC->add=0x%x", R.MP, R.M, R.PC->add);
+	}
+
 	dv = P(d);
 	P(d) = sv;
 	/* Only destroy if dv is a valid heap object (not H) */
@@ -368,8 +383,22 @@ OP(frame)
 	R.SP  = nsp;
 	f->t  = t;
 	f->mr = nil;
-	DBG("frame frame 0x%p t 0x%p t->size %d R.SP 0x%p\n",
-		f, t, t->size, R.SP);
+	DBG("frame frame 0x%p t 0x%p t->size %d t->np %d R.SP 0x%p\n",
+		f, t, t->size, t->np, R.SP);
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "frame: f=%p t=%p t->size=%d t->np=%d", f, t, t->size, t->np);
+	if (t->np == 0) {
+		__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "  WARNING: t->np=0, initializing all slots to H!");
+		/* FIX: Initialize all slots to H even if t->np=0
+		 * This prevents crashes when bytecode accesses slots beyond what the type descriptor covers
+		 */
+		int nslots = t->size / sizeof(WORD);
+		WORD **w = (WORD**)f;
+		for (int i = 0; i < nslots; i++) {
+			w[i] = H;
+		}
+	}
+#endif
 	if (t->np)
 		initmem(t, f);
 	T(d) = f;
@@ -409,8 +438,20 @@ OP(mframe)
 	R.SP = nsp;
 	f->t = t;
 	f->mr = nil;
-	DBG("\t\tmframe frame 0x%p t 0x%p t->size %d R.SP 0x%p\n",
-		f, t, t->size, R.SP);
+	DBG("\t\tmframe frame 0x%p t 0x%p t->size %d t->np %d R.SP 0x%p\n",
+		f, t, t->size, t->np, R.SP);
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "mframe: f=%p t=%p t->size=%d t->np=%d", f, t, t->size, t->np);
+	if (t->np == 0) {
+		__android_log_print(ANDROID_LOG_ERROR, "frame-debug", "  WARNING: t->np=0, initializing all slots to H!");
+		/* FIX: Initialize all slots to H even if t->np=0 */
+		int nslots = t->size / sizeof(WORD);
+		WORD **w = (WORD**)f;
+		for (int i = 0; i < nslots; i++) {
+			w[i] = H;
+		}
+	}
+#endif
 	if (t->np)
 		initmem(t, f);
 	T(d) = f;
@@ -684,6 +725,9 @@ OP(call)
 	f = T(s);
 	f->lr = R.PC;
 	f->fp = R.FP;
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_ERROR, "call-debug", "call: f=%p R.FP old=%p R.PC=%p", f, R.FP, R.PC);
+#endif
 	R.FP = (uchar*)f;
 	JMP(d);
 }

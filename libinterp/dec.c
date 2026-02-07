@@ -4,7 +4,19 @@
 #include "isa.h"
 #include "interp.h"
 
-#define DIND(reg, xxx) (uchar*)((*(uintptr*)(R.reg+R.PC->xxx.i.f))+R.PC->xxx.i.s)
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
+/* FIX: Handle H (nil pointer) specially in DIND to avoid overflow
+ * When the frame slot contains H (0xFFFFFFFFFFFFFFFF), adding an offset
+ * causes unsigned wraparound to a small value like 0x7, which then causes
+ * a crash when dereferenced. If the base pointer is H, the result should be H.
+ */
+#define DIND(reg, xxx) ({ \
+	uintptr_t _base = *(uintptr*)(R.reg+R.PC->xxx.i.f); \
+	(_base == (uintptr)H) ? (uchar*)H : (uchar*)(_base + R.PC->xxx.i.s); \
+})
 static void
 D00(void)
 {
@@ -42,7 +54,16 @@ static void
 D05(void)
 {
 	R.s = R.MP+R.PC->s.ind;
+#ifdef __ANDROID__
+	uintptr_t *fp_slot = (uintptr_t*)(R.FP+R.PC->d.i.f);
+	uintptr_t fp_val = *fp_slot;
+	__android_log_print(ANDROID_LOG_ERROR, "dind-debug", "D05 BEFORE: R.FP=%p offset=%d *slot=0x%lx",
+		R.FP, R.PC->d.i.f, fp_val);
+#endif
 	R.d = DIND(FP, d);
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_ERROR, "dind-debug", "D05 AFTER: R.d=%p", R.d);
+#endif
 	R.m = R.d;
 }
 static void

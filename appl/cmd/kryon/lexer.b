@@ -246,15 +246,98 @@ lex(l: ref LexerObj): ref Token
         return create_token(TOKEN_AT, lineno);
     }
 
-    # Arrow operator ->
+    # Arrow operator ->, compound operators +=, -=, ==, !=, <=, >=, ++, --
     if (c == '-') {
         next_char(l);  # Consume the '-'
         if (peek_char(l) == '>') {
             next_char(l);  # Consume the '>'
             return create_token(TOKEN_ARROW, lineno);
         }
-        # If it wasn't a '>', return the '-' as a single char token
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('-' + 256, lineno);  # -= as compound token
+        }
+        if (peek_char(l) == '-') {
+            next_char(l);  # Consume the second '-'
+            return create_token('-' + 512, lineno);  # -- as compound token
+        }
         return create_token('-', lineno);
+    }
+
+    if (c == '+') {
+        next_char(l);  # Consume the '+'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('+' + 256, lineno);  # += as compound token
+        }
+        if (peek_char(l) == '+') {
+            next_char(l);  # Consume the second '+'
+            return create_token('+' + 512, lineno);  # ++ as compound token
+        }
+        return create_token('+', lineno);
+    }
+
+    if (c == '=') {
+        next_char(l);  # Consume the '='
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the second '='
+            return create_token('=' + 256, lineno);  # == as compound token
+        }
+        return create_token('=', lineno);
+    }
+
+    if (c == '!') {
+        next_char(l);  # Consume the '!'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('!' + 256, lineno);  # != as compound token
+        }
+        return create_token('!', lineno);
+    }
+
+    if (c == '<') {
+        next_char(l);  # Consume the '<'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('<' + 256, lineno);  # <= as compound token
+        }
+        return create_token('<', lineno);
+    }
+
+    if (c == '>') {
+        next_char(l);  # Consume the '>'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('>' + 256, lineno);  # >= as compound token
+        }
+        return create_token('>', lineno);
+    }
+
+    if (c == '*') {
+        next_char(l);  # Consume the '*'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('*' + 256, lineno);  # *= as compound token
+        }
+        return create_token('*', lineno);
+    }
+
+    if (c == '/') {
+        next_char(l);  # Consume the '/'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('/' + 256, lineno);  # /= as compound token
+        }
+        return create_token('/', lineno);
+    }
+
+    if (c == '%') {
+        next_char(l);  # Consume the '%'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token('%' + 256, lineno);  # %= as compound token
+        }
+        return create_token('%', lineno);
     }
     
 

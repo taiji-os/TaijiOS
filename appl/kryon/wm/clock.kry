@@ -1,6 +1,11 @@
 use daytime
 use math
 
+var hrhand: ref Image
+var minhand: ref Image
+var dots: ref Image
+var back: ref Image
+
 fn initColors(display: ref Display) {
     back = display.colormix(Draw->Palebluegreen, Draw->White);
     hrhand = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Darkblue);
