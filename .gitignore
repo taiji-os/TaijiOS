@@ -38,6 +38,9 @@ vc*.pdb
 
 # kryon related
 appl/examples/*.b
+appl/kryon/*.dis
+appl/kryon/wm/*.dis
+appl/kryon/wm/*.b
 appl/kryon/*.b
 kryon/kryonc
 
