@@ -27,7 +27,7 @@ COPY . .
 
 # Build script
 RUN echo "#!/bin/bash\n\
-set -e\n\
+set -ex\n\
 export ROOT=\"\$(pwd)\"\n\
 export PATH=\"\$ROOT/Linux/amd64/bin:\$PATH\"\n\
 \n\

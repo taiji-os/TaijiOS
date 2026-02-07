@@ -266,7 +266,7 @@ main(int argc, char *argv[])
 		opt = "compile";
 
 	if(vflag)
-		print("Inferno %s main (pid=%d) %s\n", VERSION, getpid(), opt);
+		print("TaijiOS %s main (pid=%d) %s\n", VERSION, getpid(), opt);
 
 	libinit(imod);
 }

@@ -46,7 +46,7 @@ install:V: ${SERVERS:%=$DEST/%} \
 	${MAIN:%=$DEST/%}
 
 $DEST/%.dis:	%.dis
-	cp $stem.dis $target
+	mkdir -p $DEST/servers $DEST/clients $DEST/lib && rm -f $target && cp $stem.dis $target
 
 %.dis:		$MODULES ${SYSMODULES:%=$ROOT/module/%}
 

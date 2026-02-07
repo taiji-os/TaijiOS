@@ -1,13 +1,13 @@
 #!/bin/sh
-# TaijiOS Inferno Shell Launcher
+# TaijiOS Shell Launcher
 
 # Change to script directory
 cd "$(dirname "$0")"
 
-echo "=== TaijiOS Inferno Shell ==="
-echo "Starting Inferno shell..."
+echo "=== TaijiOS Shell ==="
+echo "Starting TaijiOS shell..."
 echo "Type 'exit' to quit"
 echo ""
 
-# Run the Inferno shell
+# Run the TaijiOS shell
 exec ./Linux/amd64/bin/emu -r. dis/sh.dis

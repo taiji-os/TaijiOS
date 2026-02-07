@@ -27,7 +27,7 @@ init(nil: ref Draw->Context, nil: list of string)
 	sys = load Sys Sys->PATH;
 	stderr = sys->fildes(2);
 
-	sys->print("Welcome to Inferno...\n");
+	sys->print("Welcome to TaijiOS...\n");
 
 	# set up basic devices, ignoring errors
 	# 9front does this in the shell. Can move them to dis/init later
