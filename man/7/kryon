@@ -1,0 +1,299 @@
+.TH KRYON 7
+.SH NAME
+kryon \- Kryon UI language specification
+.SH DESCRIPTION
+.I Kryon
+is a declarative domain-specific language for building graphical
+user interfaces in Inferno. It provides a concise syntax for
+defining windows, widgets, layouts, and event handlers that
+translates into Limbo code using the Tk and wmclient libraries.
+.SS Basic Structure
+Every Kryon source file defines a single
+.B Window
+containing a hierarchy of widgets:
+.PP
+.EX
+Window {
+    title = "Application Title"
+    width = 400
+    height = 300
+    bg = "#191919"
+
+    // Child widgets here
+}
+.EE
+.SS Window Properties
+.TP
+.B title
+Window title displayed in the title bar.
+.TP
+.B width
+Window width in pixels.
+.TP
+.B height
+Window height in pixels.
+.TP
+.B bg
+Background color (named color or hex value).
+.SH WIDGETS
+Widgets are the building blocks of Kryon interfaces. Each widget
+type has its own set of properties and behaviors.
+.SS Layout Widgets
+Layout widgets contain other widgets and arrange them automatically.
+.TP
+.B Column
+Arranges children vertically from top to bottom.
+.TP
+.B Row
+Arranges children horizontally from left to right.
+.TP
+.B Center
+Centers a single child widget.
+.TP
+.B Frame
+Generic container with optional border and background.
+.PP
+.EX
+Column {
+    Label { text = "Top" }
+    Label { text = "Bottom" }
+}
+.EE
+.SS Control Widgets
+.TP
+.B Button
+Clickable button.
+Properties:
+.BR text ,
+.BR bg ,
+.BR fg ,
+.BR onClick .
+.TP
+.B Checkbutton
+Checkbox control.
+Properties:
+.BR text ,
+.BR fg ,
+.BR bg ,
+.BR onChecked .
+.TP
+.B Radiobutton
+Radio button for grouped selection.
+Properties:
+.BR text ,
+.BR fg ,
+.BR bg ,
+.BR value ,
+.BR onSelected .
+.TP
+.B Scale
+Numeric slider.
+Properties:
+.BR from ,
+.BR to ,
+.BR orient ,
+.BR length ,
+.BR onScaled .
+.TP
+.B Entry
+Text input field.
+Properties:
+.BR text ,
+.BR width ,
+.BR bg ,
+.BR onChanged .
+.TP
+.B Listbox
+Scrollable list.
+Properties:
+.BR width ,
+.BR height ,
+.BR bg ,
+.BR onSelected .
+.SS Display Widgets
+.TP
+.B Label
+Text label.
+Properties:
+.BR text ,
+.BR fg ,
+.BR bg ,
+.BR font .
+.TP
+.B Message
+Multi-line text display.
+Properties: same as Label.
+.TP
+.B Img
+Image display.
+Properties:
+.B bitmap
+(path prefixed with @, e.g., @/icons/taijios.bit).
+.TP
+.B Canvas
+Drawing surface for custom graphics.
+Properties:
+.BR width ,
+.BR height ,
+.BR bg ,
+.BR onClick ,
+.BR onDraw .
+.SH PROPERTIES
+Common properties available on most widgets:
+.TP
+.B text
+Displayed text content.
+.TP
+.B fg
+Foreground color (text color).
+.TP
+.B bg
+Background color.
+.TP
+.B width
+Width in characters (Entry, Listbox) or pixels.
+.TP
+.B height
+Height in lines (Listbox) or pixels.
+.TP
+.B font
+Font specification (e.g., "Helvetica 14 bold").
+.SS Frame Properties
+.TP
+.B borderwidth
+Width of the border in pixels.
+.TP
+.B relief
+Border style: "flat", "ridge", "sunken", "raised", "groove".
+.SH EVENT HANDLERS
+Event handlers specify Limbo code to execute when user interactions
+occur. They are defined as function references or inline statements.
+.PP
+.EX
+fn onButtonClick() {
+    sys->print("Button clicked\\n");
+}
+
+Window {
+    Button {
+        text = "Click Me"
+        onClick = onButtonClick
+    }
+}
+.EE
+.SS Handler Types
+.TP
+.B onClick
+Button or Canvas clicked.
+.TP
+.B onChecked
+Checkbutton state changed.
+.TP
+.B onSelected
+Radiobutton or Listbox selection changed.
+.TP
+.B onScaled
+Scale value changed.
+.TP
+.B onChanged
+Entry text changed.
+.TP
+.B onDraw
+Canvas needs redrawing (for animation).
+.SH FUNCTIONS
+Functions in Kryon are written in Limbo syntax and are copied
+verbatim into the generated output. They can use the
+.B sys
+module for I/O and any other imported modules.
+.PP
+.EX
+fn myFunction() {
+    sys->print("Hello from Kryon\\n");
+}
+.EE
+.SH MODULE IMPORTS
+Kryon automatically imports common modules. Additional modules
+can be imported with the
+.B use
+statement:
+.PP
+.EX
+use sys
+use draw
+.EE
+.SH COLORS
+Colors can be specified by name or hex value:
+.PP
+.EX
+bg = "black"
+fg = "#ffffff"
+bg = "#191919"
+.EE
+.PP
+Standard Tk color names are supported.
+.SH FONTS
+Fonts use Tk font specifications:
+.PP
+.EX
+font = "Helvetica 14 bold"
+font = "Times 12"
+.EE
+.SH EXAMPLE
+A complete Kryon application:
+.PP
+.EX
+use sys
+
+fn onQuit() {
+    sys->print("Goodbye!\\n");
+}
+
+Window {
+    title = "My App"
+    width = 300
+    height = 200
+    bg = "#333333"
+
+    Column {
+        Label {
+            text = "Welcome"
+            fg = "white"
+            font = "Helvetica 16 bold"
+        }
+        Row {
+            Button {
+                text = "OK"
+                bg = "#2ecc71"
+                onClick = onQuit
+            }
+            Button {
+                text = "Cancel"
+                bg = "#e74c3c"
+            }
+        }
+    }
+}
+.EE
+.SH FILES
+.TP
+.B /appl/kryon/
+Example Kryon applications.
+.TP
+.B /appl/kryon/hello.kry
+Minimal example.
+.TP
+.B /appl/kryon/controls.kry
+Widget demonstration.
+.TP
+.B /appl/kryon/wm/
+Window manager applications.
+.SH SOURCE
+.B /appl/cmd/kryon
+.SH "SEE ALSO"
+.IR kryon (1),
+.IR limbo (1),
+.IR wm (1),
+.IR tk (2)
+.SH BUGS
+Reactive bindings are parsed but not yet fully implemented
+in the code generator.

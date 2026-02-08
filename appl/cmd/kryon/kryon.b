@@ -11,15 +11,13 @@ include "draw.m";
 include "bufio.m";
     bufio: Bufio;
     Iobuf: import bufio;
-include "sh.m";
-    sh: Sh;
 include "ast.m";
     ast: Ast;
 include "lexer.m";
     lexer: Lexer;
 
 # Import useful types from ast
-Program, Widget, Property, Value, ReactiveFunction, ModuleImport, SymbolTable: import ast;
+Program, Widget, Property, Value, ReactiveFunction, ModuleImport, SymbolTable, StructField, StructDecl: import ast;
 
 # Import useful types from lexer
 LexerObj, Token: import lexer;
@@ -155,6 +153,93 @@ is_compound_operator(toktype: int): int
     return 0;
 }
 
+# Convert token type to string for function bodies
+token_to_string(tok: ref Token): string
+{
+    tt := tok.toktype;
+
+    if (tt == Lexer->TOKEN_VAR)
+        return "var";
+    if (tt == Lexer->TOKEN_FN)
+        return "fn";
+    if (tt == Lexer->TOKEN_WINDOW)
+        return "Window";
+    if (tt == Lexer->TOKEN_FRAME)
+        return "Frame";
+    if (tt == Lexer->TOKEN_BUTTON)
+        return "Button";
+    if (tt == Lexer->TOKEN_LABEL)
+        return "Label";
+    if (tt == Lexer->TOKEN_ENTRY)
+        return "Entry";
+    if (tt == Lexer->TOKEN_CHECKBUTTON)
+        return "Checkbutton";
+    if (tt == Lexer->TOKEN_RADIOBUTTON)
+        return "Radiobutton";
+    if (tt == Lexer->TOKEN_LISTBOX)
+        return "Listbox";
+    if (tt == Lexer->TOKEN_CANVAS)
+        return "Canvas";
+    if (tt == Lexer->TOKEN_SCALE)
+        return "Scale";
+    if (tt == Lexer->TOKEN_MENUBUTTON)
+        return "Menubutton";
+    if (tt == Lexer->TOKEN_MESSAGE)
+        return "Message";
+    if (tt == Lexer->TOKEN_COLUMN)
+        return "Column";
+    if (tt == Lexer->TOKEN_ROW)
+        return "Row";
+    if (tt == Lexer->TOKEN_CENTER)
+        return "Center";
+    if (tt == Lexer->TOKEN_TYPE)
+        return "type";
+    if (tt == Lexer->TOKEN_STRUCT)
+        return "struct";
+    if (tt == Lexer->TOKEN_CHAN)
+        return "chan";
+    if (tt == Lexer->TOKEN_SPAWN)
+        return "spawn";
+    if (tt == Lexer->TOKEN_OF)
+        return "of";
+    if (tt == Lexer->TOKEN_ARRAY)
+        return "array";
+    if (tt == Lexer->TOKEN_IF)
+        return "if";
+    if (tt == Lexer->TOKEN_ELSE)
+        return "else";
+    if (tt == Lexer->TOKEN_FOR)
+        return "for";
+    if (tt == Lexer->TOKEN_WHILE)
+        return "while";
+    if (tt == Lexer->TOKEN_RETURN)
+        return "return";
+    if (tt == '+' + 256)
+        return "+=";
+    if (tt == '-' + 256)
+        return "-=";
+    if (tt == '=' + 256)
+        return "==";
+    if (tt == '!' + 256)
+        return "!=";
+    if (tt == '<' + 256)
+        return "<=";
+    if (tt == '>' + 256)
+        return ">=";
+    if (tt == '+' + 512)
+        return "++";
+    if (tt == '-' + 512)
+        return "--";
+    if (tt == '*' + 256)
+        return "*=";
+    if (tt == '/' + 256)
+        return "/=";
+    if (tt == '%' + 256)
+        return "%=";
+
+    return "";
+}
+
 # Parse a use statement: use module_name [alias]
 parse_use_statement(p: ref Parser): (ref ModuleImport, string)
 {
@@ -278,6 +363,236 @@ parse_reactive_function(p: ref Parser): (ref ReactiveFunction, string)
     return (nil, fmt_error(p, "expected number or identifier after '@'"));
 }
 
+# Parse a reactive function after already consuming NAME and ':'
+parse_reactive_function_after_colon(p: ref Parser, name: string): (ref ReactiveFunction, string)
+{
+    # Expect "fn"
+    (fn_tok, err3) := p.expect(Lexer->TOKEN_IDENTIFIER);
+    if (err3 != nil) {
+        return (nil, err3);
+    }
+    if (fn_tok.string_val != "fn") {
+        return (nil, fmt_error(p, "expected 'fn' keyword"));
+    }
+
+    # Expect "()"
+    (tok2, err4) := p.expect('(');
+    if (err4 != nil) {
+        return (nil, err4);
+    }
+    (tok3, err5) := p.expect(')');
+    if (err5 != nil) {
+        return (nil, err5);
+    }
+
+    # Expect "="
+    (tok4, err6) := p.expect('=');
+    if (err6 != nil) {
+        return (nil, err6);
+    }
+
+    # Parse expression until "@"
+    expr := "";
+    while (p.peek().toktype != Lexer->TOKEN_AT) {
+        tok := p.next();
+
+        # Build expression from tokens
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            expr += "\"" + tok.string_val + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            expr += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            expr += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            expr += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            # Single char token
+            expr += sys->sprint("%c", tok.toktype);
+        }
+
+        # Add space for next token (with proper spacing rules)
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_AT &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            expr += " ";
+        }
+    }
+
+    # Expect "@"
+    (tok5, err7) := p.expect(Lexer->TOKEN_AT);
+    if (err7 != nil) {
+        return (nil, err7);
+    }
+
+    # Check what follows @
+    next_tok := p.peek();
+
+    if (next_tok.toktype == Lexer->TOKEN_NUMBER) {
+        # Time-based: @ 1000
+        p.next();
+        interval := int next_tok.number_val;
+        return (ast->reactivefn_create(name, expr, interval, nil), nil);
+    } else if (next_tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+        # Var-based: @ var1, var2
+        watch_vars: ref Ast->WatchVar = nil;
+        while (p.peek().toktype == Lexer->TOKEN_IDENTIFIER) {
+            var_tok := p.next();
+            wv := ast->watchvar_create(var_tok.string_val);
+            watch_vars = ast->watchvar_list_add(watch_vars, wv);
+
+            # Check for comma
+            if (p.peek().toktype == ',')
+                p.next();
+        }
+        return (ast->reactivefn_create(name, expr, 0, watch_vars), nil);
+    }
+
+    return (nil, fmt_error(p, "expected number or identifier after '@'"));
+}
+
+# Parse a constant declaration: const NAME = value
+# 'const' already consumed, we parse NAME = value
+parse_const_decl(p: ref Parser): (ref Ast->ConstDecl, string)
+{
+    # Expect constant name
+    (name_tok, err1) := p.expect(Lexer->TOKEN_IDENTIFIER);
+    if (err1 != nil) {
+        return (nil, err1);
+    }
+    name := name_tok.string_val;
+
+    # Expect "="
+    (eq_tok, err2) := p.expect('=');
+    if (err2 != nil) {
+        return (nil, fmt_error(p, "expected '=' after constant name"));
+    }
+
+    # Parse value until newline or semicolon
+    value := "";
+
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.peek();
+
+        # Stop at newline or semicolon
+        if (tok.toktype == '\n' || tok.toktype == ';') {
+            p.next();  # consume the newline or semicolon
+            break;
+        }
+
+        tok = p.next();  # actually consume the token
+
+        # Build value from tokens
+        if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            value += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            value += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            value += sys->sprint("%g", tok.real_val);
+        } else if (tok.toktype == '(' || tok.toktype == ')' ||
+                   tok.toktype == '[' || tok.toktype == ']' ||
+                   tok.toktype == '{' || tok.toktype == '}' ||
+                   tok.toktype == ',' || tok.toktype == '.' ||
+                   tok.toktype == '+' || tok.toktype == '-' ||
+                   tok.toktype == '*' || tok.toktype == '/' ||
+                   tok.toktype == '=') {
+            value += sys->sprint("%c", tok.toktype);
+        }
+    }
+
+    if (len value == 0) {
+        return (nil, fmt_error(p, "expected value after '='"));
+    }
+
+    return (ast->constdecl_create(name, value), nil);
+}
+
+# Parse a struct declaration: struct Name { field: type ... }
+# 'struct' already consumed
+parse_struct_decl(p: ref Parser): (ref StructDecl, string)
+{
+    # Expect struct name
+    (name_tok, err1) := p.expect(Lexer->TOKEN_IDENTIFIER);
+    if (err1 != nil) {
+        return (nil, fmt_error(p, "expected struct name after 'struct'"));
+    }
+    name := name_tok.string_val;
+
+    # Expect '{'
+    (lbrace, err3) := p.expect('{');
+    if (err3 != nil) {
+        return (nil, err3);
+    }
+
+    decl := ast->structdecl_create(name);
+    fields: ref StructField = nil;
+
+    # Parse fields
+    while (p.peek().toktype != '}') {
+        # Expect field name
+        (field_name_tok, err4) := p.expect(Lexer->TOKEN_IDENTIFIER);
+        if (err4 != nil) {
+            return (nil, fmt_error(p, "expected field name or '}'"));
+        }
+
+        # Expect ':'
+        (colon, err5) := p.expect(':');
+        if (err5 != nil) {
+            return (nil, fmt_error(p, "expected ':' after field name"));
+        }
+
+        # Parse type (handle Type[] syntax for arrays)
+        type_str := "";
+        while (p.peek().toktype != ';' && p.peek().toktype != '}') {
+            tok := p.next();
+            if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                type_str += tok.string_val;
+            } else if (tok.toktype == '[') {
+                # Array syntax Type[] - convert to "array of Type"
+                # Check if next is ']'
+                if (p.peek().toktype == ']') {
+                    p.next();  # consume ']'
+                    # type_str currently has the base type, need to prepend "array of "
+                    type_str = "array of " + type_str;
+                } else {
+                    type_str += "[";
+                }
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                type_str += sys->sprint("%c", tok.toktype);
+            }
+
+            # Add space between tokens if needed
+            if (p.peek().toktype != ';' && p.peek().toktype != '}' &&
+                p.peek().toktype != ']' && p.peek().toktype != '[') {
+                peek_tok := p.peek();
+                if (should_add_space(tok.toktype, peek_tok.toktype))
+                    type_str += " ";
+            }
+        }
+
+        # Add field
+        field := ast->structfield_create(field_name_tok.string_val, type_str);
+        if (fields == nil) {
+            fields = field;
+        } else {
+            ast->structfield_list_add(fields, field);
+        }
+
+        # Expect ';'
+        if (p.peek().toktype == ';')
+            p.next();  # consume ';'
+    }
+
+    decl.fields = fields;
+
+    # Expect '}'
+    (rbrace, err6) := p.expect('}');
+    if (err6 != nil) {
+        return (nil, err6);
+    }
+
+    return (decl, nil);
+}
+
 # Parse a var declaration: var name = expr
 parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
 {
@@ -295,20 +610,31 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
         # Typed declaration: var name: type
         p.next();  # consume ':'
 
-        # Parse type (could be "ref Image", "int", "string", "chan of int", etc.)
+        # Parse type (could be "ref Image", "int", "string", "ref Image[]", etc.)
         # Stop at semicolon or any keyword (fn, var, Window, etc.)
         type_str := "";
         while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
                p.peek().toktype != ';') {
             tok := p.peek();
             # Stop if we hit a keyword (these signal end of type declaration)
-            if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_CENTER)
+            if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_CONST)
                 break;
             if (tok.toktype == Lexer->TOKEN_AT || tok.toktype == Lexer->TOKEN_ARROW)
                 break;
 
             p.next();  # consume the token
-            if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+
+            # Handle array syntax Type[]
+            if (tok.toktype == '[') {
+                # Check if next is ']'
+                if (p.peek().toktype == ']') {
+                    p.next();  # consume ']'
+                    # type_str currently has the base type, need to convert to "array of Type"
+                    type_str = "array of " + type_str;
+                } else {
+                    type_str += "[";
+                }
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
                 type_str += tok.string_val;
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
                 type_str += sys->sprint("%c", tok.toktype);
@@ -318,7 +644,7 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
                 p.peek().toktype != ';') {
                 peek_tok := p.peek();
                 # Stop at keywords
-                if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CENTER)
+                if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CONST)
                     break;
                 if (peek_tok.toktype == Lexer->TOKEN_AT || peek_tok.toktype == Lexer->TOKEN_ARROW)
                     break;
@@ -352,6 +678,13 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
             init_expr += tok.string_val;
         } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
             init_expr += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            # Preserve decimal point for whole real numbers like 180.0
+            if (tok.real_val == real (big tok.real_val)) {
+                init_expr += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                init_expr += sys->sprint("%g", tok.real_val);
+            }
         } else if (tok.toktype == Lexer->TOKEN_ARROW) {
             init_expr += "->";
         } else if (tok.toktype >= 32 && tok.toktype <= 126) {
@@ -367,6 +700,573 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
     }
 
     return (ast->var_decl_create(name, "string", init_expr, nil), nil);
+}
+
+# =========================================================================
+# Statement parsing functions
+# =========================================================================
+
+# Parse a statement - dispatcher for different statement types
+parse_statement(p: ref Parser): (ref Ast->Statement, string)
+{
+    tok := p.peek();
+    lineno := tok.lineno;
+
+    # Check based on next token type
+    if (tok.toktype == Lexer->TOKEN_VAR) {
+        return parse_var_stmt(p);
+    }
+    if (tok.toktype == Lexer->TOKEN_IF) {
+        return parse_if_stmt(p);
+    }
+    if (tok.toktype == Lexer->TOKEN_FOR) {
+        return parse_for_stmt(p);
+    }
+    if (tok.toktype == Lexer->TOKEN_WHILE) {
+        return parse_while_stmt(p);
+    }
+    if (tok.toktype == Lexer->TOKEN_RETURN) {
+        return parse_return_stmt(p);
+    }
+    if (tok.toktype == '{') {
+        return parse_block(p);
+    }
+
+    # Default: expression statement
+    return parse_expr_stmt(p);
+}
+
+# Parse a variable declaration statement: var name: type = value;
+parse_var_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect 'var'
+    (var_tok, err1) := p.expect(Lexer->TOKEN_VAR);
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Expect variable name
+    (name_tok, err2) := p.expect(Lexer->TOKEN_IDENTIFIER);
+    if (err2 != nil)
+        return (nil, err2);
+
+    name := name_tok.string_val;
+
+    # Expect ':'
+    (colon_tok, err3) := p.expect(':');
+    if (err3 != nil)
+        return (nil, err3);
+
+    # Expect type
+    (type_tok, err4) := p.expect(Lexer->TOKEN_IDENTIFIER);
+    if (err4 != nil)
+        return (nil, err4);
+
+    typ := type_tok.string_val;
+
+    # Check for array type: type[]
+    init_expr := "";
+    if (p.peek().toktype == '[') {
+        p.next();  # consume '['
+        (bracket_tok, err5) := p.expect(']');
+        if (err5 != nil)
+            return (nil, err5);
+        typ = "array of " + typ;
+    }
+
+    # Check for initialization
+    if (p.peek().toktype == '=') {
+        p.next();  # consume '='
+
+        # Parse initialization expression until ';' or newline
+        while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+               p.peek().toktype != ';' && p.peek().toktype != '\n') {
+            tok := p.next();
+
+            if (tok.toktype == Lexer->TOKEN_STRING) {
+                init_expr += "\"" + limbo_escape(tok.string_val) + "\"";
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                init_expr += tok.string_val;
+            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                init_expr += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                if (tok.real_val == real (big tok.real_val)) {
+                    init_expr += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    init_expr += sys->sprint("%g", tok.real_val);
+                }
+            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                init_expr += "->";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                init_expr += sys->sprint("%c", tok.toktype);
+            }
+
+            # Add space for next token
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != ';' && next_tok.toktype != '\n' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                init_expr += " ";
+            }
+        }
+    }
+
+    # Consume optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    var_decl := ast->var_decl_create(name, typ, init_expr, nil);
+    return (ast->statement_create_vardecl(lineno, var_decl), nil);
+}
+
+# Parse a block: { statements }
+parse_block(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect '{'
+    (lbrace, err1) := p.expect('{');
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Parse statements until '}'
+    statements: ref Ast->Statement = nil;
+
+    while (p.peek().toktype != '}' && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        (stmt, err) := parse_statement(p);
+        if (err != nil)
+            return (nil, err);
+
+        statements = ast->statement_list_add(statements, stmt);
+
+        # Skip semicolons between statements
+        if (p.peek().toktype == ';')
+            p.next();
+    }
+
+    # Expect '}'
+    (rbrace, err2) := p.expect('}');
+    if (err2 != nil)
+        return (nil, err2);
+
+    return (ast->statement_create_block(lineno, statements), nil);
+}
+
+# Parse an if statement: if (condition) { ... } [else { ... }]
+parse_if_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect 'if'
+    (if_tok, err1) := p.expect(Lexer->TOKEN_IF);
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Expect '('
+    (lparen, err2) := p.expect('(');
+    if (err2 != nil)
+        return (nil, err2);
+
+    # Parse condition expression until ')'
+    condition := "";
+    paren_count := 1;
+    while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.next();
+        if (tok.toktype == '(')
+            paren_count++;
+        else if (tok.toktype == ')')
+            paren_count--;
+
+        if (paren_count > 0) {
+            if (tok.toktype == Lexer->TOKEN_STRING) {
+                condition += "\"" + limbo_escape(tok.string_val) + "\"";
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                condition += tok.string_val;
+            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                condition += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                if (tok.real_val == real (big tok.real_val)) {
+                    condition += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    condition += sys->sprint("%g", tok.real_val);
+                }
+            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                condition += "->";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                condition += sys->sprint("%c", tok.toktype);
+            }
+
+            # Add space for next token
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != ')' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                condition += " ";
+            }
+        }
+    }
+
+    # Parse then statement (block or single statement)
+    then_stmt: ref Ast->Statement;
+    err3: string;
+    if (p.peek().toktype == '{') {
+        (then_stmt, err3) = parse_block(p);
+    } else {
+        (then_stmt, err3) = parse_statement(p);
+    }
+    if (err3 != nil)
+        return (nil, err3);
+
+    # Check for else
+    else_stmt: ref Ast->Statement = nil;
+    if (p.peek().toktype == Lexer->TOKEN_ELSE) {
+        p.next();  # consume 'else'
+
+        err4: string;
+        if (p.peek().toktype == '{') {
+            (else_stmt, err4) = parse_block(p);
+        } else {
+            (else_stmt, err4) = parse_statement(p);
+        }
+        if (err4 != nil)
+            return (nil, err4);
+    }
+
+    # Skip optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    return (ast->statement_create_if(lineno, condition, then_stmt, else_stmt), nil);
+}
+
+# Parse a for loop: for (init; condition; increment) { ... }
+# OR Limbo-style: for (var = list; var != nil; var = tl var) { ... }
+parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect 'for'
+    (for_tok, err1) := p.expect(Lexer->TOKEN_FOR);
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Expect '('
+    (lparen, err2) := p.expect('(');
+    if (err2 != nil)
+        return (nil, err2);
+
+    # Parse init statement (could be var declaration or expression)
+    init: ref Ast->Statement = nil;
+    err3: string;
+    if (p.peek().toktype == Lexer->TOKEN_VAR) {
+        (init, err3) = parse_var_stmt(p);
+    } else {
+        # Parse expression until ';'
+        init_expr := "";
+        while (p.peek().toktype != ';' && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+            tok := p.next();
+
+            if (tok.toktype == Lexer->TOKEN_STRING) {
+                init_expr += "\"" + limbo_escape(tok.string_val) + "\"";
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                init_expr += tok.string_val;
+            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                init_expr += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                if (tok.real_val == real (big tok.real_val)) {
+                    init_expr += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    init_expr += sys->sprint("%g", tok.real_val);
+                }
+            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                init_expr += "->";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                init_expr += sys->sprint("%c", tok.toktype);
+            }
+
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != ';' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                init_expr += " ";
+            }
+        }
+        if (len init_expr > 0)
+            init = ast->statement_create_expr(lineno, init_expr);
+    }
+
+    if (err3 != nil)
+        return (nil, err3);
+
+    # Expect ';'
+    (semi1, err4) := p.expect(';');
+    if (err4 != nil)
+        return (nil, err4);
+
+    # Parse condition expression until ';'
+    condition := "";
+    while (p.peek().toktype != ';' && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.next();
+
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            condition += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            condition += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            condition += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            if (tok.real_val == real (big tok.real_val)) {
+                condition += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                condition += sys->sprint("%g", tok.real_val);
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            condition += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            condition += sys->sprint("%c", tok.toktype);
+        }
+
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+            next_tok.toktype != ';' &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            condition += " ";
+        }
+    }
+
+    # Expect ';'
+    (semi2, err5) := p.expect(';');
+    if (err5 != nil)
+        return (nil, err5);
+
+    # Parse increment expression until ')'
+    increment := "";
+    paren_count := 1;
+    while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.next();
+        if (tok.toktype == '(')
+            paren_count++;
+        else if (tok.toktype == ')')
+            paren_count--;
+
+        if (paren_count > 0) {
+            if (tok.toktype == Lexer->TOKEN_STRING) {
+                increment += "\"" + limbo_escape(tok.string_val) + "\"";
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                increment += tok.string_val;
+            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                increment += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                if (tok.real_val == real (big tok.real_val)) {
+                    increment += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    increment += sys->sprint("%g", tok.real_val);
+                }
+            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                increment += "->";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                increment += sys->sprint("%c", tok.toktype);
+            }
+
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != ')' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                increment += " ";
+            }
+        }
+    }
+
+    # Parse body (block or single statement)
+    body: ref Ast->Statement;
+    err6: string;
+    if (p.peek().toktype == '{') {
+        (body, err6) = parse_block(p);
+    } else {
+        (body, err6) = parse_statement(p);
+    }
+    if (err6 != nil)
+        return (nil, err6);
+
+    # Skip optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    return (ast->statement_create_for(lineno, init, condition, increment, body), nil);
+}
+
+# Parse a while loop: while (condition) { ... }
+parse_while_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect 'while'
+    (while_tok, err1) := p.expect(Lexer->TOKEN_WHILE);
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Expect '('
+    (lparen, err2) := p.expect('(');
+    if (err2 != nil)
+        return (nil, err2);
+
+    # Parse condition expression until ')'
+    condition := "";
+    paren_count := 1;
+    while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        tok := p.next();
+        if (tok.toktype == '(')
+            paren_count++;
+        else if (tok.toktype == ')')
+            paren_count--;
+
+        if (paren_count > 0) {
+            if (tok.toktype == Lexer->TOKEN_STRING) {
+                condition += "\"" + limbo_escape(tok.string_val) + "\"";
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                condition += tok.string_val;
+            } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                condition += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                if (tok.real_val == real (big tok.real_val)) {
+                    condition += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    condition += sys->sprint("%g", tok.real_val);
+                }
+            } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                condition += "->";
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                condition += sys->sprint("%c", tok.toktype);
+            }
+
+            next_tok := p.peek();
+            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                next_tok.toktype != ')' &&
+                should_add_space(tok.toktype, next_tok.toktype)) {
+                condition += " ";
+            }
+        }
+    }
+
+    # Parse body (block or single statement)
+    body: ref Ast->Statement;
+    err3: string;
+    if (p.peek().toktype == '{') {
+        (body, err3) = parse_block(p);
+    } else {
+        (body, err3) = parse_statement(p);
+    }
+    if (err3 != nil)
+        return (nil, err3);
+
+    # Skip optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    return (ast->statement_create_while(lineno, condition, body), nil);
+}
+
+# Parse a return statement: return; or return expression;
+parse_return_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect 'return'
+    (ret_tok, err1) := p.expect(Lexer->TOKEN_RETURN);
+    if (err1 != nil)
+        return (nil, err1);
+
+    # Parse return value (if any) until ';' or newline
+    expression := "";
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+           p.peek().toktype != ';' && p.peek().toktype != '\n' &&
+           p.peek().toktype != '}') {
+        tok := p.next();
+
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            expression += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            expression += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            expression += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            if (tok.real_val == real (big tok.real_val)) {
+                expression += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                expression += sys->sprint("%g", tok.real_val);
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            expression += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            expression += sys->sprint("%c", tok.toktype);
+        }
+
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+            next_tok.toktype != ';' && next_tok.toktype != '\n' &&
+            next_tok.toktype != '}' &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            expression += " ";
+        }
+    }
+
+    # Consume optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    return (ast->statement_create_return(lineno, expression), nil);
+}
+
+# Parse an expression statement: expression;
+parse_expr_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Parse expression until ';' or newline or '}'
+    expression := "";
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+           p.peek().toktype != ';' && p.peek().toktype != '\n' &&
+           p.peek().toktype != '}') {
+        tok := p.next();
+
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            expression += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            expression += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            expression += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            if (tok.real_val == real (big tok.real_val)) {
+                expression += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                expression += sys->sprint("%g", tok.real_val);
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            expression += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            expression += sys->sprint("%c", tok.toktype);
+        } else {
+            # Handle keyword tokens
+            s := token_to_string(tok);
+            if (s != nil && len s > 0)
+                expression += s;
+        }
+
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+            next_tok.toktype != ';' && next_tok.toktype != '\n' &&
+            next_tok.toktype != '}' &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            expression += " ";
+        }
+    }
+
+    # Consume optional semicolon
+    if (p.peek().toktype == ';')
+        p.next();
+
+    return (ast->statement_create_expr(lineno, expression), nil);
 }
 
 # Parse a regular function declaration: fn name() { ... }
@@ -434,7 +1334,7 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
         p.next();  # consume '='
 
         # Parse expression until end of line or @
-        body := "";
+        body_expr := "";
         while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
                p.peek().toktype != Lexer->TOKEN_AT &&
                p.peek().toktype != '\n') {
@@ -442,15 +1342,24 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
 
             # Build expression from tokens
             if (tok.toktype == Lexer->TOKEN_STRING) {
-                body += "\"" + limbo_escape(tok.string_val) + "\"";
+                body_expr += "\"" + limbo_escape(tok.string_val) + "\"";
             } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
-                body += tok.string_val;
+                body_expr += tok.string_val;
             } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
-                body += sys->sprint("%bd", tok.number_val);
+                body_expr += sys->sprint("%bd", tok.number_val);
+            } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                # Use %.1g to ensure decimal point is preserved for values like 180.0
+                # But %g can still drop the decimal, so check if value is whole number
+                if (tok.real_val == real (big tok.real_val)) {
+                    # Whole number - need to add .0 to preserve type
+                    body_expr += sys->sprint("%bd.0", big tok.real_val);
+                } else {
+                    body_expr += sys->sprint("%g", tok.real_val);
+                }
             } else if (tok.toktype == Lexer->TOKEN_ARROW) {
-                body += "->";
+                body_expr += "->";
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
-                body += sys->sprint("%c", tok.toktype);
+                body_expr += sys->sprint("%c", tok.toktype);
             }
 
             # Add space for next token (if not end, with proper spacing rules)
@@ -459,7 +1368,7 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
                 next_tok.toktype != Lexer->TOKEN_AT &&
                 next_tok.toktype != '\n' &&
                 should_add_space(tok.toktype, next_tok.toktype)) {
-                body += " ";
+                body_expr += " ";
             }
         }
 
@@ -474,165 +1383,24 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
             interval = int num_tok.number_val;
         }
 
-        # Inline functions need explicit return statement in Limbo
-        # Prepend "return " and ensure semicolon at end
-        if (len body > 0) {
-            body = "return " + body;
-            if (body[len body - 1] != ';') {
-                body += ";";
-            }
-        }
+        # Inline functions need explicit return statement
+        # Create a Return statement with the expression
+        body_stmt := ast->statement_create_return(lexer->get_lineno(p.l), body_expr);
 
-        # Create function declaration with inline body
-        fn_decl := ast->functiondecl_create(name, body);
-        fn_decl.params = params;
-        fn_decl.return_type = return_type;
-        fn_decl.reactive_interval = interval;
+        # Create function declaration with parsed body
+        fn_decl := ast->functiondecl_create_with_body(name, params, body_stmt, return_type, interval);
         return (fn_decl, nil);
     }
 
     # Block body: fn name() { ... }
-    (tok3, err3) := p.expect('{');
+    # Use parse_block to parse statements
+    body_stmt: ref Ast->Statement;
+    err3: string;
+    (body_stmt, err3) = parse_block(p);
     if (err3 != nil)
         return (nil, err3);
 
-    # Parse function body using token-based parsing
-    # This avoids manual position manipulation that breaks lexer state
-    body := "";
-    brace_count := 1;
-    while (brace_count > 0) {
-        tok := p.next();
-        if (tok.toktype == Lexer->TOKEN_ENDINPUT) {
-            return (nil, fmt_error(p, "unterminated function body"));
-        }
-
-        # Add token to body string
-        if (tok.toktype == Lexer->TOKEN_STRING) {
-            body += "\"" + limbo_escape(tok.string_val) + "\"";
-        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
-            body += tok.string_val;
-        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
-            body += sys->sprint("%bd", tok.number_val);
-        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
-            body += "->";
-        } else if (tok.toktype == '\n') {
-            body += "\n";
-        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
-            body += sys->sprint("%c", tok.toktype);
-        } else {
-            # Handle keyword tokens
-            case tok.toktype {
-            Lexer->TOKEN_VAR or
-            Lexer->TOKEN_FN or
-            Lexer->TOKEN_WINDOW or
-            Lexer->TOKEN_FRAME or
-            Lexer->TOKEN_BUTTON or
-            Lexer->TOKEN_LABEL or
-            Lexer->TOKEN_ENTRY or
-            Lexer->TOKEN_CHECKBUTTON or
-            Lexer->TOKEN_RADIOBUTTON or
-            Lexer->TOKEN_LISTBOX or
-            Lexer->TOKEN_CANVAS or
-            Lexer->TOKEN_SCALE or
-            Lexer->TOKEN_MENUBUTTON or
-            Lexer->TOKEN_MESSAGE or
-            Lexer->TOKEN_COLUMN or
-            Lexer->TOKEN_ROW or
-            Lexer->TOKEN_CENTER =>
-                # These keywords should have been handled by identifier case
-                # But if they appear as tokens, convert to string
-                if (tok.toktype == Lexer->TOKEN_VAR)
-                    body += "var";
-                else if (tok.toktype == Lexer->TOKEN_FN)
-                    body += "fn";
-                else if (tok.toktype == Lexer->TOKEN_WINDOW)
-                    body += "Window";
-                else if (tok.toktype == Lexer->TOKEN_FRAME)
-                    body += "Frame";
-                else if (tok.toktype == Lexer->TOKEN_BUTTON)
-                    body += "Button";
-                else if (tok.toktype == Lexer->TOKEN_LABEL)
-                    body += "Label";
-                else if (tok.toktype == Lexer->TOKEN_ENTRY)
-                    body += "Entry";
-                else if (tok.toktype == Lexer->TOKEN_CHECKBUTTON)
-                    body += "Checkbutton";
-                else if (tok.toktype == Lexer->TOKEN_RADIOBUTTON)
-                    body += "Radiobutton";
-                else if (tok.toktype == Lexer->TOKEN_LISTBOX)
-                    body += "Listbox";
-                else if (tok.toktype == Lexer->TOKEN_CANVAS)
-                    body += "Canvas";
-                else if (tok.toktype == Lexer->TOKEN_SCALE)
-                    body += "Scale";
-                else if (tok.toktype == Lexer->TOKEN_MENUBUTTON)
-                    body += "Menubutton";
-                else if (tok.toktype == Lexer->TOKEN_MESSAGE)
-                    body += "Message";
-                else if (tok.toktype == Lexer->TOKEN_COLUMN)
-                    body += "Column";
-                else if (tok.toktype == Lexer->TOKEN_ROW)
-                    body += "Row";
-                else if (tok.toktype == Lexer->TOKEN_CENTER)
-                    body += "Center";
-
-            '+' + 256 =>
-                body += "+=";
-            '-' + 256 =>
-                body += "-=";
-            '=' + 256 =>
-                body += "==";
-            '!' + 256 =>
-                body += "!=";
-            '<' + 256 =>
-                body += "<=";
-            '>' + 256 =>
-                body += ">=";
-            '+' + 512 =>
-                body += "++";
-            '-' + 512 =>
-                body += "--";
-            '*' + 256 =>
-                body += "*=";
-            '/' + 256 =>
-                body += "/=";
-            '%' + 256 =>
-                body += "%=";
-            * =>
-                # Unknown token, skip
-                ;
-            }
-        }
-
-        # Track braces
-        if (tok.toktype == '{') {
-            brace_count++;
-        } else if (tok.toktype == '}') {
-            brace_count--;
-        }
-
-        # Add space between tokens if needed (look ahead)
-        if (brace_count > 0) {
-            next_tok := p.peek();
-            if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
-                next_tok.toktype != '}' &&
-                should_add_space(tok.toktype, next_tok.toktype)) {
-                body += " ";
-            }
-        }
-    }
-
-    # Clear peek buffer to ensure clean parser state
-    # We've consumed the closing }, so reset any peeked token
-    p.has_peek = 0;
-
-    # body now includes the closing brace, so remove it
-    if (len body > 0 && body[len body - 1] == '}')
-        body = body[0: len body - 1];
-
-    fn_decl := ast->functiondecl_create(name, body);
-    fn_decl.params = params;
-    fn_decl.return_type = return_type;
+    fn_decl := ast->functiondecl_create_with_body(name, params, body_stmt, return_type, 0);
     return (fn_decl, nil);
 }
 
@@ -653,6 +1421,9 @@ parse_value(p: ref Parser): (ref Value, string)
 
     Lexer->TOKEN_NUMBER =>
         return (ast->value_create_number(tok.number_val), nil);
+
+    Lexer->TOKEN_REAL =>
+        return (ast->value_create_real(tok.real_val), nil);
 
     Lexer->TOKEN_COLOR =>
         return (ast->value_create_color(tok.string_val), nil);
@@ -681,11 +1452,30 @@ parse_property(p: ref Parser): (ref Property, string)
 {
     tok := p.next();
 
-    if (tok.toktype != Lexer->TOKEN_IDENTIFIER) {
+    # Accept keywords as property names too (e.g., "type = Appl")
+    # Check if it's an identifier or a keyword that can be used as property name
+    name := "";
+    if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+        name = tok.string_val;
+    } else if (tok.toktype == Lexer->TOKEN_TYPE) {
+        name = "type";
+    } else if (tok.toktype == Lexer->TOKEN_STRUCT) {
+        name = "struct";
+    } else if (tok.toktype == Lexer->TOKEN_CHAN) {
+        name = "chan";
+    } else if (tok.toktype == Lexer->TOKEN_SPAWN) {
+        name = "spawn";
+    } else if (tok.toktype == Lexer->TOKEN_OF) {
+        name = "of";
+    } else if (tok.toktype == Lexer->TOKEN_ARRAY) {
+        name = "array";
+    } else if (tok.toktype == Lexer->TOKEN_VAR) {
+        name = "var";
+    } else if (tok.toktype == Lexer->TOKEN_FN) {
+        name = "fn";
+    } else {
         return (nil, fmt_error(p, "expected property name"));
     }
-
-    name := tok.string_val;
 
     # Expect '='
     (tok1, err1) := p.expect('=');
@@ -762,9 +1552,19 @@ parse_widget_body_content(p: ref Parser): (ref Property, ref Widget, string)
             break;
         }
 
-        # Property: identifier = value
-        if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
-            # Peek ahead to see if next token is '='
+        # Property: identifier (or keyword) = value
+        # Check if this could be a property: peek ahead to see if next token is '='
+        if (tok.toktype == Lexer->TOKEN_IDENTIFIER ||
+            tok.toktype == Lexer->TOKEN_TYPE ||
+            tok.toktype == Lexer->TOKEN_VAR ||
+            tok.toktype == Lexer->TOKEN_FN ||
+            tok.toktype == Lexer->TOKEN_STRUCT ||
+            tok.toktype == Lexer->TOKEN_CHAN ||
+            tok.toktype == Lexer->TOKEN_ARRAY) {
+            # Peek ahead to see if next token is '=' (confirms this is a property)
+            next_tok := p.peek();
+            # Actually we need to peek TWO tokens ahead since tok is already peeked
+            # Consume the token and let parse_property handle it
             (prop, err1) := parse_property(p);
             if (err1 != nil) {
                 return (nil, nil, err1);
@@ -1165,12 +1965,30 @@ parse_program(p: ref Parser): (ref Program, string)
         }
     }
 
-    # Parse var declarations and reactive functions
+    # Parse const, struct, var, fn declarations and reactive functions
     while (p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
         tok := p.peek();
 
+        # Check for const declaration: const NAME = value
+        if (tok.toktype == Lexer->TOKEN_CONST) {
+            p.next();  # consume 'const'
+            (cd, err) := parse_const_decl(p);
+            if (err != nil) {
+                return (nil, err);
+            }
+            ast->program_add_const(prog, cd);
+        }
+        # Check for struct declaration: struct Name { ... }
+        else if (tok.toktype == Lexer->TOKEN_STRUCT) {
+            p.next();  # consume 'struct'
+            (sd, err) := parse_struct_decl(p);
+            if (err != nil) {
+                return (nil, err);
+            }
+            ast->program_add_struct_decl(prog, sd);
+        }
         # Check for regular function declaration
-        if (tok.toktype == Lexer->TOKEN_FN) {
+        else if (tok.toktype == Lexer->TOKEN_FN) {
             p.next();  # consume 'fn'
             (fd, err) := parse_function_decl(p);
             if (err != nil) {
@@ -1187,7 +2005,7 @@ parse_program(p: ref Parser): (ref Program, string)
             }
             ast->program_add_var(prog, vd);
         }
-        # Check for Window (app declaration) - must come before IDENTIFIER check
+        # Check for Window (app declaration)
         else if (tok.toktype == Lexer->TOKEN_WINDOW) {
             (app, err) := parse_app_decl(p);
             if (err != nil) {
@@ -1212,10 +2030,10 @@ parse_program(p: ref Parser): (ref Program, string)
                 }
                 ast->program_add_reactive_fn(prog, rfn);
             } else {
-                return (nil, fmt_error(p, "expected function declaration, var declaration, reactive function, or Window"));
+                return (nil, fmt_error(p, "expected function declaration, var declaration, constant declaration, reactive function, struct declaration, or Window"));
             }
         } else {
-            return (nil, fmt_error(p, "expected function declaration, var declaration, reactive function, or Window"));
+            return (nil, fmt_error(p, "expected function declaration, var declaration, constant declaration, reactive function, struct declaration, or Window"));
         }
     }
 
@@ -1341,52 +2159,25 @@ extract_param_names(params: string): list of string
     return result;
 }
 
-# Scan a function body string for local var declarations
+# Scan a function body statement for local var declarations
 # Returns list of local variable names
-extract_local_vars(body: string): list of string
+extract_local_vars_from_stmt(body: ref Ast->Statement): list of string
 {
     locals: list of string = nil;
 
-    if (body == nil || len body == 0)
+    if (body == nil)
         return locals;
 
-    # Create a lexer to scan the body
-    l := lexer->create("<function>", body);
-
-    while (1) {
-        tok := lexer->lex(l);
-        if (tok.toktype == Lexer->TOKEN_ENDINPUT)
-            break;
-
-        # Look for 'var' keyword followed by identifier
-        if (tok.toktype == Lexer->TOKEN_VAR) {
-            # Next token should be the variable name
-            name_tok := lexer->lex(l);
-            if (name_tok.toktype == Lexer->TOKEN_IDENTIFIER) {
-                # Check if it's a type annotation (var name: type) or assignment (var name =)
-                # Either way, the first identifier after 'var' is the variable name
-                varname := name_tok.string_val;
-
-                # Skip to end of declaration (consume tokens until we hit ';' or newline)
-                # This handles both: var name = expr and var name: type = expr
-                while (1) {
-                    peek_tok := lexer->peek_token(l);
-                    if (peek_tok.toktype == Lexer->TOKEN_ENDINPUT ||
-                        peek_tok.toktype == ';' ||
-                        peek_tok.toktype == '\n')
-                        break;
-                    lexer->lex(l);  # consume token
-                }
-
-                # Consume the ';' or '\n' too
-                peek_tok := lexer->peek_token(l);
-                if (peek_tok.toktype == ';' || peek_tok.toktype == '\n')
-                    lexer->lex(l);
-
+    stmt := body;
+    while (stmt != nil) {
+        pick s := stmt {
+        VarDecl =>
+            if (s.var_decl != nil) {
+                varname := s.var_decl.name;
                 # Add to locals (avoid duplicates)
                 found := 0;
-                for (l2 := locals; l2 != nil; l2 = tl l2) {
-                    if (hd l2 == varname) {
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == varname) {
                         found = 1;
                         break;
                     }
@@ -1394,21 +2185,196 @@ extract_local_vars(body: string): list of string
                 if (!found)
                     locals = varname :: locals;
             }
+        Block =>
+            # Recursively extract from nested statements
+            nested := extract_local_vars_from_stmt(s.statements);
+            # Merge nested locals into locals
+            while (nested != nil) {
+                name := hd nested;
+                # Check for duplicate
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                nested = tl nested;
+            }
+        If =>
+            # Extract from then and else branches
+            then_locals := extract_local_vars_from_stmt(s.then_stmt);
+            else_locals := extract_local_vars_from_stmt(s.else_stmt);
+            # Merge
+            while (then_locals != nil) {
+                name := hd then_locals;
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                then_locals = tl then_locals;
+            }
+            while (else_locals != nil) {
+                name := hd else_locals;
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                else_locals = tl else_locals;
+            }
+        For =>
+            # Extract from init and body
+            init_locals := extract_local_vars_from_stmt(s.init);
+            body_locals := extract_local_vars_from_stmt(s.body);
+            # Merge
+            while (init_locals != nil) {
+                name := hd init_locals;
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                init_locals = tl init_locals;
+            }
+            while (body_locals != nil) {
+                name := hd body_locals;
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                body_locals = tl body_locals;
+            }
+        While =>
+            # Extract from body
+            body_locals := extract_local_vars_from_stmt(s.body);
+            while (body_locals != nil) {
+                name := hd body_locals;
+                found := 0;
+                for (l := locals; l != nil; l = tl l) {
+                    if (hd l == name) {
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    locals = name :: locals;
+                body_locals = tl body_locals;
+            }
+        * =>
+            # Return, Expr statements don't declare variables
         }
+        stmt = stmt.next;
     }
 
     return locals;
 }
 
-# Check all identifiers in a function body against the symbol table
+# Check all identifiers in a function body statement against the symbol table
 # Returns error string if undefined variable found, nil otherwise
-check_function_body(body: string, st: ref Ast->SymbolTable, fn_name: string): string
+check_statement_body(stmt: ref Ast->Statement, st: ref Ast->SymbolTable, fn_name: string): string
 {
-    if (body == nil || len body == 0)
+    if (stmt == nil)
         return nil;
 
-    # Create a lexer to scan the body
-    lex := lexer->create("<function>", body);
+    s := stmt;
+    while (s != nil) {
+        pick cur := s {
+        VarDecl =>
+            # Check init expression
+            if (cur.var_decl != nil && cur.var_decl.init_expr != nil && len cur.var_decl.init_expr > 0) {
+                err := check_expression_string(cur.var_decl.init_expr, st, fn_name);
+                if (err != nil)
+                    return err;
+            }
+        Block =>
+            # Recursively check nested statements
+            err := check_statement_body(cur.statements, st, fn_name);
+            if (err != nil)
+                return err;
+        If =>
+            # Check condition expression
+            err := check_expression_string(cur.condition, st, fn_name);
+            if (err != nil)
+                return err;
+            # Check then and else branches
+            err = check_statement_body(cur.then_stmt, st, fn_name);
+            if (err != nil)
+                return err;
+            err = check_statement_body(cur.else_stmt, st, fn_name);
+            if (err != nil)
+                return err;
+        For =>
+            # Check init, condition, increment, and body
+            err := check_statement_body(cur.init, st, fn_name);
+            if (err != nil)
+                return err;
+            err = check_expression_string(cur.condition, st, fn_name);
+            if (err != nil)
+                return err;
+            err = check_expression_string(cur.increment, st, fn_name);
+            if (err != nil)
+                return err;
+            err = check_statement_body(cur.body, st, fn_name);
+            if (err != nil)
+                return err;
+        While =>
+            # Check condition and body
+            err := check_expression_string(cur.condition, st, fn_name);
+            if (err != nil)
+                return err;
+            err = check_statement_body(cur.body, st, fn_name);
+            if (err != nil)
+                return err;
+        Return =>
+            # Check return expression
+            if (cur.expression != nil && len cur.expression > 0) {
+                err := check_expression_string(cur.expression, st, fn_name);
+                if (err != nil)
+                    return err;
+            }
+        Expr =>
+            # Check expression
+            if (cur.expression != nil && len cur.expression > 0) {
+                err := check_expression_string(cur.expression, st, fn_name);
+                if (err != nil)
+                    return err;
+            }
+        }
+        s = s.next;
+    }
+
+    return nil;
+}
+
+# Check identifiers in an expression string against the symbol table
+check_expression_string(expr: string, st: ref Ast->SymbolTable, fn_name: string): string
+{
+    if (expr == nil || len expr == 0)
+        return nil;
+
+    # Create a lexer to scan the expression
+    lex := lexer->create("<expression>", expr);
 
     prev_tok: ref Token;
     prev_tok = nil;
@@ -1434,30 +2400,22 @@ check_function_body(body: string, st: ref Ast->SymbolTable, fn_name: string): st
             if (prev_tok != nil) {
                 if (prev_tok.toktype == '.' ||
                     prev_tok.toktype == Lexer->TOKEN_ARROW) {
-                    # This is a method/member name, not a variable
-                    # Update prev_tok and continue
                     prev_tok = tok;
                     continue;
                 }
             }
 
-            # Peek at next token to check for method calls (obj.method or obj->method)
-            # If next token is -> or ., this is the object, which we DO want to check
-            peek_tok := lexer->peek_token(lex);
-
             # Skip uppercase identifiers that are likely type names
-            # (unless they're explicitly in the symbol table)
             if (len name > 0 && name[0] >= 'A' && name[0] <= 'Z') {
-                # Only check if it's in the symbol table
-                if (!ast->symboltable_has_var(st, name))
+                if (!ast->symboltable_has_var(st, name)) {
                     prev_tok = tok;
                     continue;
+                }
             }
 
             # Check if variable is defined
             if (!ast->symboltable_has_var(st, name)) {
-                return sys->sprint("undefined variable '%s' in function '%s' at line %d",
-                    name, fn_name, tok.lineno);
+                return sys->sprint("undefined variable '%s'", name);
             }
         }
 
@@ -1540,7 +2498,7 @@ check_undefined_variables(prog: ref Program): string
         }
 
         # Add local variables from function body
-        locals := extract_local_vars(fd.body);
+        locals := extract_local_vars_from_stmt(fd.body);
         {
         l := locals;
         while (l != nil) {
@@ -1550,7 +2508,7 @@ check_undefined_variables(prog: ref Program): string
         }
 
         # Check the function body
-        err := check_function_body(fd.body, fn_st, fd.name);
+        err := check_statement_body(fd.body, fn_st, fd.name);
         if (err != nil)
             return err;
 
@@ -1578,6 +2536,283 @@ limbo_escape(s: string): string
         }
     }
     return res;
+}
+
+# =========================================================================
+# Graphics API transformation functions
+# =========================================================================
+
+# Check if expression is a Graphics method call (e.g., ctx.clear("#fff"))
+# Returns (is_graphics_call, transformed_expression, color_declarations)
+transform_graphics_call(expr: string): (int, string, string)
+{
+    if (expr == nil || len expr == 0)
+        return (0, expr, "");
+
+    # Trim leading/trailing whitespace
+    start := 0;
+    while (start < len expr && (expr[start] == ' ' || expr[start] == '\t'))
+        start++;
+
+    end := len expr;
+    while (end > 0 && (expr[end-1] == ' ' || expr[end-1] == '\t' || expr[end-1] == '\n'))
+        end--;
+
+    if (start >= end)
+        return (0, expr, "");
+
+    trimmed := expr[start:end];
+
+    # Check for pattern: identifier.method(arguments)
+    # Graphics methods: clear, fill, stroke, rect, circle, ellipse, line, text, setlinewidth
+
+    # Find the first '.' to check for method call
+    dot_pos := -1;
+    for (i = 0; i < len trimmed; i++) {
+        if (trimmed[i] == '.') {
+            dot_pos = i;
+            break;
+        }
+    }
+
+    if (dot_pos <= 0 || dot_pos >= len trimmed - 1)
+        return (0, expr, "");
+
+    obj := trimmed[0:dot_pos];
+    rest := trimmed[dot_pos+1:];
+
+    # Check if object is 'ctx' or similar
+    is_ctx := (obj == "ctx");
+
+    if (!is_ctx)
+        return (0, expr, "");
+
+    # Find method name and arguments
+    method := "";
+    args := "";
+
+    # Find opening parenthesis
+    paren_pos := -1;
+    for (i = 0; i < len rest; i++) {
+        if (rest[i] == '(') {
+            method = rest[0:i];
+            # Find matching closing parenthesis
+            depth := 1;
+            arg_start := i + 1;
+            for (j := i + 1; j < len rest; j++) {
+                if (rest[j] == '(')
+                    depth++;
+                else if (rest[j] == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        args = rest[arg_start:j];
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    if (method == nil || len method == 0)
+        return (0, expr, "");
+
+    # Transform known Graphics methods
+    color_decls := "";
+
+    case method {
+    "clear" =>
+        # ctx.clear(color) -> Graphics->clear(ctx, color)
+        # If args is a string literal, transform Color expression
+        (args, color_decls) = transform_color_arg(args);
+        return (1, sys->sprint("Graphics->clear(%s, %s)", obj, args), color_decls);
+
+    "fill" =>
+        # ctx.fill(color) -> Graphics->setfill(ctx, color)
+        (args, color_decls) = transform_color_arg(args);
+        return (1, sys->sprint("Graphics->setfill(%s, %s)", obj, args), color_decls);
+
+    "stroke" =>
+        # ctx.stroke(color) -> Graphics->setstroke(ctx, color)
+        (args, color_decls) = transform_color_arg(args);
+        return (1, sys->sprint("Graphics->setstroke(%s, %s)", obj, args), color_decls);
+
+    "rect" =>
+        # ctx.rect(x, y, w, h) -> Graphics->rect(ctx, x, y, w, h)
+        return (1, sys->sprint("Graphics->rect(%s, %s)", obj, args), "");
+
+    "circle" =>
+        # ctx.circle(x, y, r) -> Graphics->circle(ctx, x, y, r)
+        return (1, sys->sprint("Graphics->circle(%s, %s)", obj, args), "");
+
+    "ellipse" =>
+        # ctx.ellipse(x, y, rx, ry) -> Graphics->ellipse(ctx, x, y, rx, ry)
+        return (1, sys->sprint("Graphics->ellipse(%s, %s)", obj, args), "");
+
+    "line" =>
+        # ctx.line(x1, y1, x2, y2) -> Graphics->line(ctx, x1, y1, x2, y2)
+        return (1, sys->sprint("Graphics->line(%s, %s)", obj, args), "");
+
+    "text" =>
+        # ctx.text(str, x, y) -> Graphics->text(ctx, str, x, y)
+        return (1, sys->sprint("Graphics->text(%s, %s)", obj, args), "");
+
+    "setlinewidth" =>
+        # ctx.setlinewidth(w) -> Graphics->setlinewidth(ctx, w)
+        return (1, sys->sprint("Graphics->setlinewidth(%s, %s)", obj, args), "");
+    }
+
+    return (0, expr, "");
+}
+
+# Transform Color expressions (e.g., Color.red, Color("#ff0000"), Color.rgb(255,0,0))
+# Returns (transformed_arg, color_declarations)
+transform_color_arg(arg: string): (string, string)
+{
+    if (arg == nil || len arg == 0)
+        return (arg, "");
+
+    # Trim whitespace
+    start := 0;
+    while (start < len arg && (arg[start] == ' ' || arg[start] == '\t'))
+        start++;
+
+    end := len arg;
+    while (end > 0 && (arg[end-1] == ' ' || arg[end-1] == '\t' || arg[end-1] == '\n'))
+        end--;
+
+    if (start >= end)
+        return (arg, "");
+
+    trimmed := arg[start:end];
+
+    # Check for Color.name pattern (e.g., Color.red)
+    if (len trimmed > 6 && trimmed[0:6] == "Color.") {
+        color_name := trimmed[6:];
+        return (transform_color_name(color_name), "");
+    }
+
+    # Check for Color("#hex") pattern
+    if (len trimmed > 8 && trimmed[0:6] == "Color" && trimmed[6] == '(') {
+        inner := trimmed[7:len trimmed - 1];
+        if (len inner > 0 && inner[0] == '"') {
+            # Color("#ff0000") -> extract hex and call display.color
+            hex_val := inner[1:len inner - 1];
+            return (sys->sprint("Graphics->hexcolor(display, \"%s\")", hex_val), "");
+        }
+    }
+
+    # Check for Color.rgb(r,g,b) pattern
+    if (len trimmed > 11 && trimmed[0:6] == "Color" && trimmed[6:9] == ".rgb" && trimmed[9] == '(') {
+        args := trimmed[10:len trimmed - 1];
+        # Color.rgb(255,0,0) -> display.rgb(255,0,0)
+        return (sys->sprint("Graphics->rgb(display, %s)", args), "");
+    }
+
+    return (arg, "");
+}
+
+# Transform color name to display.color call
+transform_color_name(name: string): string
+{
+    # CSS color names mapping to Draw->Display constants
+    case name {
+    "black" =>
+        return "display.black";
+    "white" =>
+        return "display.white";
+    "red" =>
+        return "display.red";
+    "green" =>
+        return "display.green";
+    "blue" =>
+        return "display.blue";
+    "yellow" =>
+        return "display.yellow";
+    "purple" =>
+        return "display.purple";
+    "cyan" =>
+        return "display.cyan";
+    "magenta" =>
+        return "display.magenta";
+    "grey" or "gray" =>
+        return "display.grey";
+    "palegrey" or "palegray" =>
+        return "display.palegrey";
+    "darkgrey" or "darkgray" =>
+        return "display.darkgrey";
+    "paleyellow" =>
+        return "display.paleyellow";
+    "darkyellow" =>
+        return "display.darkyellow";
+    "darkgreen" =>
+        return "display.darkgreen";
+    "palegreen" =>
+        return "display.palegreen";
+    "darkblue" =>
+        return "display.darkblue";
+    "paleblue" =>
+        return "display.palebluegreen";
+    "darkred" =>
+        return "display.darkred";
+    "palered" or "pink" =>
+        return "display.paleyellow";
+    * =>
+        # Unknown color - try to use as is (might be a user variable)
+        return sys->sprint("display.%s", name);
+    }
+}
+
+# Check if a string contains a Graphics method call
+has_graphics_call(expr: string): int
+{
+    if (expr == nil || len expr == 0)
+        return 0;
+
+    # Look for pattern: ctx.method(
+    i := 0;
+    while (i < len expr - 5) {
+        if (expr[i:i+3] == "ctx" && expr[i+3] == '.') {
+            # Found ctx. - now check if followed by a method name
+            j := i + 4;
+            method := "";
+            while (j < len expr && expr[j] != '(') {
+                method[len method] = expr[j];
+                j++;
+            }
+            # Check if it's a known Graphics method
+            if (is_graphics_method(method))
+                return 1;
+        }
+        i++;
+    }
+
+    return 0;
+}
+
+# Check if method name is a Graphics method
+is_graphics_method(method: string): int
+{
+    if (method == nil || len method == 0)
+        return 0;
+
+    # Trim whitespace
+    start := 0;
+    while (start < len method && (method[start] == ' ' || method[start] == '\t'))
+        start++;
+
+    end := len method;
+    while (end > 0 && (method[end-1] == ' ' || method[end-1] == '\t'))
+        end--;
+
+    trimmed := method[start:end];
+
+    if (trimmed == "clear" || trimmed == "fill" || trimmed == "stroke" ||
+        trimmed == "rect" || trimmed == "circle" || trimmed == "ellipse" ||
+        trimmed == "line" || trimmed == "text" || trimmed == "setlinewidth")
+        return 1;
+
+    return 0;
 }
 
 # Convert Kryon var syntax to Limbo syntax
@@ -2132,6 +3367,21 @@ collect_widget_commands(cg: ref Codegen, prog: ref Program): string
 }
 
 # Generate variable declarations
+generate_const_decls(cg: ref Codegen, prog: ref Program): string
+{
+    cds := prog.consts;
+
+    while (cds != nil) {
+        # Generate: con NAME = value;
+        sys->fprint(cg.output, "con %s = %s;\n", cds.name, cds.value);
+        cds = cds.next;
+    }
+
+    if (prog.consts != nil)
+        sys->fprint(cg.output, "\n");
+    return nil;
+}
+
 generate_var_decls(cg: ref Codegen, prog: ref Program): string
 {
     vds := prog.vars;
@@ -2408,6 +3658,116 @@ module_list_contains(mods: list of ref Module, name: string): int
     return 0;
 }
 
+# Check if program needs Graphics module (Canvas widgets or Graphics method calls)
+needs_graphics_module(prog: ref Program): int
+{
+    if (prog == nil)
+        return 0;
+
+    # Check if there are Canvas widgets
+    if (prog.app != nil && prog.app.body != nil) {
+        if (has_canvas_widget(prog.app.body))
+            return 1;
+    }
+
+    # Check function declarations for Graphics context parameters
+    fd := prog.function_decls;
+    while (fd != nil) {
+        # Check if params contain Graphics type or ctx parameter
+        if (fd.params != nil) {
+            params := fd.params;
+            # Simple check for "Graphics" or "ctx" in params
+            if (params_contains_graphics(params))
+                return 1;
+        }
+
+        # Check function body for Graphics method calls
+        if (fd.body != nil && has_graphics_in_statement(fd.body))
+            return 1;
+
+        fd = fd.next;
+    }
+
+    return 0;
+}
+
+# Check if params string contains Graphics or ctx
+params_contains_graphics(params: string): int
+{
+    if (params == nil || len params == 0)
+        return 0;
+
+    # Check for Graphics type or ctx identifier
+    if (sys->tokenize(params, "Graphics") != nil)
+        return 1;
+
+    # Check for ctx identifier
+    if (sys->tokenize(params, "ctx") != nil)
+        return 1;
+
+    return 0;
+}
+
+# Recursively check if widget tree contains Canvas
+has_canvas_widget(w: ref Widget): int
+{
+    while (w != nil) {
+        if (w.wtype == Ast->WIDGET_CANVAS)
+            return 1;
+
+        # Check children
+        if (w.children != nil && has_canvas_widget(w.children))
+            return 1;
+
+        w = w.next;
+    }
+    return 0;
+}
+
+# Recursively check if statement contains Graphics method call
+has_graphics_in_statement(stmt: ref Ast->Statement): int
+{
+    if (stmt == nil)
+        return 0;
+
+    pick s := stmt {
+    Expr =>
+        if (s.expression != nil && has_graphics_call(s.expression))
+            return 1;
+    Block =>
+        sub := s.statements;
+        while (sub != nil) {
+            if (has_graphics_in_statement(sub))
+                return 1;
+            sub = sub.next;
+        }
+    If =>
+        if (has_graphics_in_statement(s.then_stmt))
+            return 1;
+        if (s.else_stmt != nil && has_graphics_in_statement(s.else_stmt))
+            return 1;
+    For =>
+        if (has_graphics_in_statement(s.init))
+            return 1;
+        if (s.body != nil && has_graphics_in_statement(s.body))
+            return 1;
+    While =>
+        if (s.body != nil && has_graphics_in_statement(s.body))
+            return 1;
+    Return =>
+        if (s.expression != nil && has_graphics_call(s.expression))
+            return 1;
+    * =>
+        # Skip other types
+    }
+
+    # Check next in chain
+    if (stmt.next != nil)
+        return has_graphics_in_statement(stmt.next);
+
+    return 0;
+}
+
 # Generate prologue
 generate_prologue(cg: ref Codegen, prog: ref Program): string
 {
@@ -2429,10 +3789,35 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     modules = ref Module("draw", "draw", "Draw") :: modules;
 
     if (is_draw) {
+        # Check if mouse events are needed
+        need_pointer := 0;
+        if (prog.app != nil && prog.app.props != nil) {
+            p := prog.app.props;
+            while (p != nil) {
+                if (p.name == "onMouseDown" || p.name == "onMouseUp" || p.name == "onMouseMove") {
+                    need_pointer = 1;
+                    break;
+                }
+                p = p.next;
+            }
+        }
+        if (need_pointer) {
+            modules = ref Module("pointer", "pointer", "Pointer") :: modules;
+        }
+
+        # Check if Graphics module is needed (Canvas widgets with onDraw)
+        if (needs_graphics_module(prog)) {
+            modules = ref Module("graphics", "graphics", "Graphics") :: modules;
+        }
+
         # tk must come before wmclient - add wmclient first (it goes to front)
         modules = ref Module("wmclient", "wmclient", "Wmclient") :: modules;
         modules = ref Module("tk", "tk", "Tk") :: modules;
     } else {
+        # Check if Graphics is needed for Tk backend (Canvas widgets)
+        if (needs_graphics_module(prog)) {
+            modules = ref Module("graphics", "graphics", "Graphics") :: modules;
+        }
         modules = ref Module("tkclient", "tkclient", "Tkclient") :: modules;
         modules = ref Module("tk", "tk", "Tk") :: modules;
     }
@@ -2480,6 +3865,22 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     if (is_draw) {
         buf += "Display, Image, Point, Rect: import draw;\n";
         buf += "Window: import wmclient;\n";
+
+        # Check if mouse events are needed
+        need_pointer := 0;
+        if (prog.app != nil && prog.app.props != nil) {
+            p := prog.app.props;
+            while (p != nil) {
+                if (p.name == "onMouseDown" || p.name == "onMouseUp" || p.name == "onMouseMove") {
+                    need_pointer = 1;
+                    break;
+                }
+                p = p.next;
+            }
+        }
+        if (need_pointer) {
+            buf += "Pointer: import pointer;\n";
+        }
         buf += "\n";
     }
 
@@ -2499,8 +3900,179 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
 
     buf += "};\n";
 
+    # Generate struct declarations (ADTs)
+    sd := prog.struct_decls;
+    while (sd != nil) {
+        buf += sys->sprint("\n%s: adt {\n", sd.name);
+        field := sd.fields;
+        while (field != nil) {
+            buf += sys->sprint("    %s: %s;\n", field.name, field.typename);
+            field = field.next;
+        }
+        buf += "};\n";
+        sd = sd.next;
+    }
+
     # Write prologue
     sys->fprint(cg.output, "%s", buf);
+
+    return nil;
+}
+
+# Generate code for a single statement
+generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): string
+{
+    if (stmt == nil)
+        return nil;
+
+    # Build indent string
+    indent_str := "";
+    for (i := 0; i < indent; i++)
+        indent_str += "    ";
+
+    # Generate based on statement type
+    pick s := stmt {
+    VarDecl =>
+        # Local variable declaration
+        if (s.var_decl != nil) {
+            if (s.var_decl.init_expr != nil && len s.var_decl.init_expr > 0) {
+                # var with initialization: name := value
+                sys->fprint(cg.output, "%s%s := %s;\n", indent_str, s.var_decl.name, s.var_decl.init_expr);
+            } else {
+                # var without initialization: name : type
+                sys->fprint(cg.output, "%s%s : %s;\n", indent_str, s.var_decl.name, s.var_decl.typ);
+            }
+        }
+
+    Block =>
+        sys->fprint(cg.output, "%s{\n", indent_str);
+        sub_stmt := s.statements;
+        while (sub_stmt != nil) {
+            generate_statement(cg, sub_stmt, indent + 1);
+            sub_stmt = sub_stmt.next;
+        }
+        sys->fprint(cg.output, "%s}\n", indent_str);
+
+    If =>
+        # if (condition) then_stmt [else else_stmt]
+        sys->fprint(cg.output, "%sif (%s) {\n", indent_str, s.condition);
+        if (s.then_stmt != nil) {
+            pick ts := s.then_stmt {
+            Block =>
+                # Already has braces, just indent the content
+                sub_stmt := ts.statements;
+                while (sub_stmt != nil) {
+                    generate_statement(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+            * =>
+                generate_statement(cg, s.then_stmt, indent + 1);
+            }
+        }
+        sys->fprint(cg.output, "%s}", indent_str);
+
+        if (s.else_stmt != nil) {
+            sys->fprint(cg.output, " else {\n");
+            pick es := s.else_stmt {
+            Block =>
+                sub_stmt := es.statements;
+                while (sub_stmt != nil) {
+                    generate_statement(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+            * =>
+                generate_statement(cg, s.else_stmt, indent + 1);
+            }
+            sys->fprint(cg.output, "%s}\n", indent_str);
+        } else {
+            sys->fprint(cg.output, "\n");
+        }
+
+    For =>
+        # for (init; condition; increment) body
+        sys->fprint(cg.output, "%sfor (", indent_str);
+
+        # Init
+        if (s.init != nil) {
+            pick i := s.init {
+            VarDecl =>
+                if (i.var_decl.init_expr != nil && len i.var_decl.init_expr > 0)
+                    sys->fprint(cg.output, "%s := %s", i.var_decl.name, i.var_decl.init_expr);
+                else
+                    sys->fprint(cg.output, "%s : %s", i.var_decl.name, i.var_decl.typ);
+            Expr =>
+                sys->fprint(cg.output, "%s", i.expression);
+            * =>
+                # Skip other statement types as init
+            }
+        }
+
+        sys->fprint(cg.output, "; %s; %s) {\n", s.condition, s.increment);
+
+        if (s.body != nil) {
+            pick b := s.body {
+            Block =>
+                sub_stmt := b.statements;
+                while (sub_stmt != nil) {
+                    generate_statement(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+            * =>
+                generate_statement(cg, s.body, indent + 1);
+            }
+        }
+
+        sys->fprint(cg.output, "%s}\n", indent_str);
+
+    While =>
+        # while (condition) body
+        sys->fprint(cg.output, "%swhile (%s) {\n", indent_str, s.condition);
+
+        if (s.body != nil) {
+            pick b := s.body {
+            Block =>
+                sub_stmt := b.statements;
+                while (sub_stmt != nil) {
+                    generate_statement(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+            * =>
+                generate_statement(cg, s.body, indent + 1);
+            }
+        }
+
+        sys->fprint(cg.output, "%s}\n", indent_str);
+
+    Return =>
+        # return expression;
+        if (s.expression != nil && len s.expression > 0)
+            sys->fprint(cg.output, "%sreturn %s;\n", indent_str, s.expression);
+        else
+            sys->fprint(cg.output, "%sreturn;\n", indent_str);
+
+    Expr =>
+        # expression statement
+        if (s.expression != nil && len s.expression > 0) {
+            # Check if this is a Graphics method call that needs transformation
+            (is_graphics, transformed, color_decls) := transform_graphics_call(s.expression);
+            if (is_graphics) {
+                # Output any color declarations first
+                if (color_decls != nil && len color_decls > 0)
+                    sys->fprint(cg.output, "%s%s\n", indent_str, color_decls);
+                sys->fprint(cg.output, "%s%s;\n", indent_str, transformed);
+            } else {
+                # Check for Color expressions and transform them
+                (transformed, decls) := transform_color_arg(s.expression);
+                if (decls != nil && len decls > 0)
+                    sys->fprint(cg.output, "%s%s\n", indent_str, decls);
+                sys->fprint(cg.output, "%s%s;\n", indent_str, transformed);
+            }
+        }
+    }
+
+    # Process next statement in chain
+    if (stmt.next != nil)
+        generate_statement(cg, stmt.next, indent);
 
     return nil;
 }
@@ -2518,53 +4090,9 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
             sys->fprint(cg.output, "\n%s(%s)\n", fd.name, fd.params);
         sys->fprint(cg.output, "{\n");
 
-        if (fd.body != nil && fd.body != "") {
-            # Convert Kryon var syntax to Limbo syntax
-            body := convert_var_syntax(fd.body);
-
-            # Trim leading whitespace/newlines from body
-            while (len body > 0 && (body[0] == ' ' || body[0] == '\t' || body[0] == '\n' || body[0] == '\r')) {
-                body = body[1:];
-            }
-
-            # Split body by lines and process each line
-            (line_count, lines) := sys->tokenize(body, "\n");
-            # Convert list to array for indexing
-            if (lines != nil) {
-                # Build array from list
-                arr := array[line_count] of string;
-                tmp := lines;
-                for (j := 0; j < line_count; j++) {
-                    arr[j] = hd tmp;
-                    tmp = tl tmp;
-                }
-
-                for (i := 0; i < line_count; i++) {
-                    line := arr[i];
-
-                    # Trim leading whitespace from line
-                    while (len line > 0 && (line[0] == ' ' || line[0] == '\t')) {
-                        line = line[1:];
-                    }
-
-                    # Trim trailing whitespace from line
-                    while (len line > 0 && (line[len line - 1] == ' ' || line[len line - 1] == '\t' || line[len line - 1] == '\r')) {
-                        line = line[0: len line - 1];
-                    }
-
-                    # Skip empty lines
-                    if (len line == 0)
-                        continue;
-
-                    # Add semicolon if line doesn't end with one
-                    if (len line > 0 && line[len line - 1] != ';' && line[len line - 1] != '{' && line[len line - 1] != '}') {
-                        line += ";";
-                    }
-
-                    # Indent the line
-                    sys->fprint(cg.output, "    %s\n", line);
-                }
-            }
+        # Generate statements from the parsed AST
+        if (fd.body != nil) {
+            generate_statement(cg, fd.body, 1);
         }
 
         sys->fprint(cg.output, "}\n");
@@ -2695,6 +4223,9 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
     ondraw_interval := 0;
     oninit_fn := "";
     window_type := "Appl";
+    onmousedown_fn := "";
+    onmouseup_fn := "";
+    onmousemove_fn := "";
 
     if (prog.app != nil && prog.app.props != nil) {
         p := prog.app.props;
@@ -2712,6 +4243,18 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
             } else if (p.name == "type" && p.value != nil) {
                 if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
                     window_type = ast->value_get_ident(p.value);
+                }
+            } else if (p.name == "onMouseDown" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    onmousedown_fn = ast->value_get_ident(p.value);
+                }
+            } else if (p.name == "onMouseUp" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    onmouseup_fn = ast->value_get_ident(p.value);
+                }
+            } else if (p.name == "onMouseMove" && p.value != nil) {
+                if (p.value.valtype == Ast->VALUE_IDENTIFIER) {
+                    onmousemove_fn = ast->value_get_ident(p.value);
                 }
             }
             p = p.next;
@@ -2756,6 +4299,14 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
     sys->fprint(cg.output, "    sys = load Sys Sys->PATH;\n");
     sys->fprint(cg.output, "    draw = load Draw Draw->PATH;\n");
     sys->fprint(cg.output, "    math = load Math Math->PATH;\n");
+
+    # Load Pointer module if using mouse events
+    if (onmousedown_fn != nil && onmousedown_fn != "" ||
+        onmouseup_fn != nil && onmouseup_fn != "" ||
+        onmousemove_fn != nil && onmousemove_fn != "") {
+        sys->fprint(cg.output, "    pointer: Pointer;\n");
+        sys->fprint(cg.output, "    pointer = load Pointer Pointer->PATH;\n");
+    }
 
     # Load user modules (skip built-in ones: sys, draw, math, wmclient)
     imports := prog.module_imports;
@@ -2805,6 +4356,16 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
     sys->fprint(cg.output, "    w.startinput(\"ptr\" :: nil);\n");
     sys->fprint(cg.output, "\n");
 
+    # Generate mouse event handler calls
+    if (onmousedown_fn != nil && onmousedown_fn != "" ||
+        onmouseup_fn != nil && onmouseup_fn != "" ||
+        onmousemove_fn != nil && onmousemove_fn != "") {
+        sys->fprint(cg.output, "    # Mouse event handling\n");
+        sys->fprint(cg.output, "    mousech := chan of ref Pointer->Provevent;\n");
+        sys->fprint(cg.output, "    w.readmouse(mousech);\n");
+        sys->fprint(cg.output, "\n");
+    }
+
     if (ondraw_fn != nil && ondraw_fn != "") {
         sys->fprint(cg.output, "    now := daytime->now();\n");
         sys->fprint(cg.output, "    %s(w.image, now);\n", ondraw_fn);
@@ -2826,6 +4387,28 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
         sys->fprint(cg.output, "                ;\n");
     }
     sys->fprint(cg.output, "\n");
+
+    # Mouse events
+    if (onmousedown_fn != nil && onmousedown_fn != "" ||
+        onmouseup_fn != nil && onmouseup_fn != "" ||
+        onmousemove_fn != nil && onmousemove_fn != "") {
+        sys->fprint(cg.output, "        e := <-mousech =>\n");
+        sys->fprint(cg.output, "            if(e == nil) break;\n");
+        if (onmousedown_fn != nil && onmousedown_fn != "") {
+            sys->fprint(cg.output, "            if(e.buttons != 0 && e.oldbuttons == 0)\n");
+            sys->fprint(cg.output, "                %s(e.xy.x, e.xy.y, e.buttons);\n", onmousedown_fn);
+        }
+        if (onmouseup_fn != nil && onmouseup_fn != "") {
+            sys->fprint(cg.output, "            if(e.buttons == 0 && e.oldbuttons != 0)\n");
+            sys->fprint(cg.output, "                %s(e.xy.x, e.xy.y, e.oldbuttons);\n", onmouseup_fn);
+        }
+        if (onmousemove_fn != nil && onmousemove_fn != "") {
+            sys->fprint(cg.output, "            if(e.buttons != 0)\n");
+            sys->fprint(cg.output, "                %s(e.xy.x, e.xy.y);\n", onmousemove_fn);
+        }
+        sys->fprint(cg.output, "\n");
+    }
+
     sys->fprint(cg.output, "        p := <-w.ctxt.ptr =>\n");
     sys->fprint(cg.output, "            w.pointer(*p);\n");
     sys->fprint(cg.output, "\n");
@@ -3177,6 +4760,12 @@ generate(output: string, prog: ref Program, module_name: string): string
     }
 
     # Generate module variables (time, tpid) after module declaration
+    err = generate_const_decls(cg, prog);
+    if (err != nil) {
+        fd = nil;
+        return err;
+    }
+
     err = generate_var_decls(cg, prog);
     if (err != nil) {
         fd = nil;

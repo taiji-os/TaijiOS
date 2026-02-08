@@ -28,6 +28,7 @@ Ast: module
     VALUE_IDENTIFIER: con 4;
     VALUE_ARRAY: con 5;
     VALUE_FN_CALL: con 6;
+    VALUE_REAL: con 7;
 
     # Code block type constants
     CODE_LIMBO: con 1;
@@ -43,6 +44,8 @@ Ast: module
             string_val: string;
         Number =>
             number_val: big;
+        Real =>
+            real_val: real;
         Color =>
             color_val: string;
         Identifier =>
@@ -85,6 +88,13 @@ Ast: module
         init_expr: string;          # initialization expression as string
         init_value: ref Value;
         next: ref VarDecl;
+    };
+
+    # Constant declaration ADT
+    ConstDecl: adt {
+        name: string;
+        value: string;
+        next: ref ConstDecl;
     };
 
     # Parameter ADT
@@ -131,10 +141,39 @@ Ast: module
     FunctionDecl: adt {
         name: string;
         params: string;               # parameter list string (e.g., "x: int, y: int")
-        body: string;
+        body: ref Statement;          # parsed statement body (instead of string)
         return_type: string;          # return type annotation (e.g., "string")
         reactive_interval: int;       # reactive binding interval (0 for non-reactive)
         next: ref FunctionDecl;
+    };
+
+    # Statement ADT for function bodies
+    Statement: adt {
+        lineno: int;
+        next: ref Statement;
+
+        pick {
+        VarDecl =>
+            var_decl: ref Ast->VarDecl;
+        Block =>
+            statements: ref Statement;
+        If =>
+            condition: string;        # expression as string
+            then_stmt: ref Statement;
+            else_stmt: ref Statement;
+        For =>
+            init: ref Statement;      # usually VarDecl
+            condition: string;
+            increment: string;
+            body: ref Statement;
+        While =>
+            condition: string;
+            body: ref Statement;
+        Return =>
+            expression: string;       # empty string for no value
+        Expr =>
+            expression: string;       # expression statement
+        }
     };
 
     # Reactive binding ADT (tracks widget -> reactive function relationships)
@@ -152,6 +191,31 @@ Ast: module
         next: ref ModuleImport;
     };
 
+    # Struct field ADT
+    StructField: adt {
+        name: string;
+        typename: string;
+        next: ref StructField;
+    };
+
+    # Struct declaration ADT
+    StructDecl: adt {
+        name: string;
+        fields: ref StructField;
+        next: ref StructDecl;
+    };
+
+    # Spawn statement ADT
+    SpawnStmt: adt {
+        fn_name: string;
+        args: string;  # argument expression string
+    };
+
+    # Channel type ADT (for type annotations)
+    ChanType: adt {
+        elem_type: string;  # element type (e.g., "int" for "chan of int")
+    };
+
     # Symbol table for tracking variables in scope during validation
     SymbolTable: adt {
         vars: list of string;        # Local variables
@@ -162,6 +226,7 @@ Ast: module
 
     # Program ADT (root node)
     Program: adt {
+        consts: ref ConstDecl;
         vars: ref VarDecl;
         code_blocks: ref CodeBlock;
         components: ref ComponentDef;
@@ -169,11 +234,13 @@ Ast: module
         reactive_fns: ref ReactiveFunction;
         module_imports: ref ModuleImport;
         function_decls: ref FunctionDecl;  # regular function declarations
+        struct_decls: ref StructDecl;      # struct type declarations
         window_type: int;    # 0=Tk, 1=Draw/wmclient
     };
 
     # AST construction functions
     program_create: fn(): ref Program;
+    constdecl_create: fn(name: string, value: string): ref ConstDecl;
     var_decl_create: fn(name: string, typ: string, init_expr: string, init: ref Value): ref VarDecl;
     code_block_create: fn(typ: int, code: string): ref CodeBlock;
     component_create: fn(name: string): ref ComponentDef;
@@ -186,7 +253,14 @@ Ast: module
     value_create_ident: fn(id: string): ref Value;
     value_create_array: fn(items: array of ref Value): ref Value;
     value_create_fn_call: fn(fn_name: string): ref Value;
+    value_create_real: fn(r: real): ref Value;
     param_create: fn(name: string, typ: string, default_val: string): ref Param;
+
+    # Struct functions
+    structfield_create: fn(name: string, typename: string): ref StructField;
+    structfield_list_add: fn(head: ref StructField, item: ref StructField): ref StructField;
+    structdecl_create: fn(name: string): ref StructDecl;
+    structdecl_list_add: fn(head: ref StructDecl, item: ref StructDecl): ref StructDecl;
 
     # Module import functions
     moduleimport_create: fn(module_name: string, alias: string): ref ModuleImport;
@@ -209,14 +283,26 @@ Ast: module
     reactivefn_list_add: fn(head: ref ReactiveFunction, rfn: ref ReactiveFunction): ref ReactiveFunction;
 
     # Regular function declaration functions
-    functiondecl_create: fn(name: string, body: string): ref FunctionDecl;
+    functiondecl_create: fn(name: string, body: ref Statement): ref FunctionDecl;
+    functiondecl_create_with_body: fn(name: string, params: string, body: ref Statement, return_type: string, interval: int): ref FunctionDecl;
     functiondecl_list_add: fn(head: ref FunctionDecl, fn_decl: ref FunctionDecl): ref FunctionDecl;
     reactivebinding_create: fn(widget_path: string, property_name: string, fn_name: string): ref ReactiveBinding;
     reactivebinding_list_add: fn(head: ref ReactiveBinding, binding: ref ReactiveBinding): ref ReactiveBinding;
 
+    # Statement constructor functions
+    statement_create_vardecl: fn(lineno: int, var_decl: ref VarDecl): ref Statement;
+    statement_create_block: fn(lineno: int, statements: ref Statement): ref Statement;
+    statement_create_if: fn(lineno: int, condition: string, then_stmt: ref Statement, else_stmt: ref Statement): ref Statement;
+    statement_create_for: fn(lineno: int, init: ref Statement, condition: string, increment: string, body: ref Statement): ref Statement;
+    statement_create_while: fn(lineno: int, condition: string, body: ref Statement): ref Statement;
+    statement_create_return: fn(lineno: int, expression: string): ref Statement;
+    statement_create_expr: fn(lineno: int, expression: string): ref Statement;
+    statement_list_add: fn(head: ref Statement, stmt: ref Statement): ref Statement;
+
     # Widget linking functions
     widget_add_child: fn(parent: ref Widget, child: ref Widget);
     widget_add_property: fn(w: ref Widget, prop: ref Property);
+    program_add_const: fn(prog: ref Program, cd: ref ConstDecl);
     program_add_var: fn(prog: ref Program, var: ref VarDecl);
     program_add_code_block: fn(prog: ref Program, code: ref CodeBlock);
     program_add_component: fn(prog: ref Program, comp: ref ComponentDef);
@@ -224,8 +310,10 @@ Ast: module
     program_add_reactive_fn: fn(prog: ref Program, rfn: ref ReactiveFunction);
     program_add_module_import: fn(prog: ref Program, imp: ref ModuleImport);
     program_add_function_decl: fn(prog: ref Program, fn_decl: ref FunctionDecl);
+    program_add_struct_decl: fn(prog: ref Program, decl: ref StructDecl);
 
     # List building functions
+    constdecl_list_add: fn(listhd: ref ConstDecl, item: ref ConstDecl): ref ConstDecl;
     property_list_add: fn(listhd: ref Property, item: ref Property): ref Property;
     widget_list_add: fn(listhd: ref Widget, item: ref Widget): ref Widget;
     var_list_add: fn(listhd: ref VarDecl, item: ref VarDecl): ref VarDecl;

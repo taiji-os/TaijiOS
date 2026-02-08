@@ -44,7 +44,7 @@ Toolbar: module
 MAXCONSOLELINES:	con 1024;
 
 font: string;
-icon: string = "vitasmall.bit";
+icon: string = "logo_32.bit";
 
 # execute this if no menu items have been created
 # by the init script.

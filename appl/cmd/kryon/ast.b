@@ -8,7 +8,12 @@ include "ast.m";
 
 program_create(): ref Program
 {
-    return ref Program (nil, nil, nil, nil, nil, nil, nil, 0);
+    return ref Program (nil, nil, nil, nil, nil, nil, nil, nil, nil, 0);
+}
+
+constdecl_create(name: string, value: string): ref ConstDecl
+{
+    return ref ConstDecl (name, value, nil);
 }
 
 var_decl_create(name: string, typ: string, init_expr: string, init: ref Value): ref VarDecl
@@ -72,6 +77,21 @@ param_create(name: string, typ: string, default_val: string): ref Param
 }
 
 # Widget linking functions
+
+program_add_const(prog: ref Program, cd: ref ConstDecl)
+{
+    if (prog == nil || cd == nil)
+        return;
+
+    if (prog.consts == nil) {
+        prog.consts = cd;
+    } else {
+        c := prog.consts;
+        while (c.next != nil)
+            c = c.next;
+        c.next = cd;
+    }
+}
 
 widget_add_child(parent: ref Widget, child: ref Widget)
 {
@@ -169,6 +189,18 @@ program_add_reactive_fn(prog: ref Program, rfn: ref ReactiveFunction)
 }
 
 # List building functions
+
+constdecl_list_add(listhd: ref ConstDecl, item: ref ConstDecl): ref ConstDecl
+{
+    if (listhd == nil)
+        return item;
+
+    c := listhd;
+    while (c.next != nil)
+        c = c.next;
+    c.next = item;
+    return listhd;
+}
 
 property_list_add(listhd: ref Property, item: ref Property): ref Property
 {
@@ -392,9 +424,14 @@ reactivebinding_list_add(head: ref ReactiveBinding, binding: ref ReactiveBinding
 
 # Regular function declaration helper functions
 
-functiondecl_create(name: string, body: string): ref FunctionDecl
+functiondecl_create(name: string, body: ref Statement): ref FunctionDecl
 {
     return ref FunctionDecl (name, "", body, "", 0, nil);
+}
+
+functiondecl_create_with_body(name: string, params: string, body: ref Statement, return_type: string, interval: int): ref FunctionDecl
+{
+    return ref FunctionDecl (name, params, body, return_type, interval, nil);
 }
 
 functiondecl_list_add(head: ref FunctionDecl, fn_decl: ref FunctionDecl): ref FunctionDecl
@@ -514,4 +551,121 @@ symboltable_has_var(st: ref SymbolTable, name: string): int
     }
 
     return 0;
+}
+
+# Struct field and declaration functions
+
+structfield_create(name: string, typename: string): ref StructField
+{
+    return ref StructField (name, typename, nil);
+}
+
+structfield_list_add(head: ref StructField, item: ref StructField): ref StructField
+{
+    if (head == nil)
+        return item;
+
+    f := head;
+    while (f.next != nil)
+        f = f.next;
+    f.next = item;
+    return head;
+}
+
+structdecl_create(name: string): ref StructDecl
+{
+    return ref StructDecl (name, nil, nil);
+}
+
+structdecl_list_add(head: ref StructDecl, item: ref StructDecl): ref StructDecl
+{
+    if (head == nil)
+        return item;
+
+    d := head;
+    while (d.next != nil)
+        d = d.next;
+    d.next = item;
+    return head;
+}
+
+program_add_struct_decl(prog: ref Program, decl: ref StructDecl)
+{
+    if (prog == nil || decl == nil)
+        return;
+
+    if (prog.struct_decls == nil) {
+        prog.struct_decls = decl;
+    } else {
+        d := prog.struct_decls;
+        while (d.next != nil)
+            d = d.next;
+        d.next = decl;
+    }
+}
+
+# Real value helper functions
+
+value_create_real(r: real): ref Value
+{
+    return ref Value.Real (Ast->VALUE_REAL, r);
+}
+
+value_get_real(v: ref Value): real
+{
+    if (v == nil || v.valtype != VALUE_REAL)
+        return 0.0;
+    pick rv := v {
+    Real => return rv.real_val;
+    * => return 0.0;
+    }
+}
+
+# Statement constructor functions
+
+statement_create_vardecl(lineno: int, var_decl: ref VarDecl): ref Statement
+{
+    return ref Statement.VarDecl (lineno, nil, var_decl);
+}
+
+statement_create_block(lineno: int, statements: ref Statement): ref Statement
+{
+    return ref Statement.Block (lineno, nil, statements);
+}
+
+statement_create_if(lineno: int, condition: string, then_stmt: ref Statement, else_stmt: ref Statement): ref Statement
+{
+    return ref Statement.If (lineno, nil, condition, then_stmt, else_stmt);
+}
+
+statement_create_for(lineno: int, init: ref Statement, condition: string, increment: string, body: ref Statement): ref Statement
+{
+    return ref Statement.For (lineno, nil, init, condition, increment, body);
+}
+
+statement_create_while(lineno: int, condition: string, body: ref Statement): ref Statement
+{
+    return ref Statement.While (lineno, nil, condition, body);
+}
+
+statement_create_return(lineno: int, expression: string): ref Statement
+{
+    return ref Statement.Return (lineno, nil, expression);
+}
+
+statement_create_expr(lineno: int, expression: string): ref Statement
+{
+    return ref Statement.Expr (lineno, nil, expression);
+}
+
+statement_list_add(head: ref Statement, stmt: ref Statement): ref Statement
+{
+    if (head == nil)
+        return stmt;
+
+    s := head;
+    while (s.next != nil)
+        s = s.next;
+    s.next = stmt;
+    return head;
 }

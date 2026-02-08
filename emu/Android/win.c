@@ -71,12 +71,19 @@ static const char vertex_shader_src[] =
 	"	v_texcoord = a_texcoord;\n"
 	"}\n";
 
+/*
+ * Fragment shader that converts BGRA to RGBA
+ * Our XRGB32 pixel data is in BGRA byte order in memory
+ * This shader swaps the red and blue channels to correct the colors
+ */
 static const char fragment_shader_src[] =
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D u_texture;\n"
 	"void main() {\n"
-	"	gl_FragColor = texture2D(u_texture, v_texcoord);\n"
+	"	vec4 color = texture2D(u_texture, v_texcoord);\n"
+	"	/* Swap BGRA to RGBA - XRGB32 stores B,G,R,A in memory */\n"
+	"	gl_FragColor = color.bgra;\n"
 	"}\n";
 
 /* Fullscreen quad vertices */
@@ -330,16 +337,22 @@ flushmemscreen(Rectangle r)
 	if(call_count < 3 || (call_count % 100) == 0) {
 		/* Sample a few pixels to see if data is present */
 		/* Check test pattern location first (150,150) which should be green */
+		/* XRGB32 format: B,G,R,A in memory */
 		int test_pattern_offset = (150 * screenwidth + 150) * 4;
 		int center_offset = (screenheight/2 * screenwidth + screenwidth/2) * 4;
 		LOGI("flushmemscreen: call %d, screendata=%p", call_count, screendata);
-		LOGI("  test_pattern(150,150): [%d,%d,%d,%d]",
+		/* In XRGB32: [0]=B, [1]=G, [2]=R, [3]=A */
+		LOGI("  test_pattern(150,150) XRGB32[B,G,R,A]: [%d,%d,%d,%d] => RGB(%d,%d,%d)",
 		     screendata[test_pattern_offset + 0], screendata[test_pattern_offset + 1],
-		     screendata[test_pattern_offset + 2], screendata[test_pattern_offset + 3]);
-		LOGI("  center(%d,%d): [%d,%d,%d,%d]",
+		     screendata[test_pattern_offset + 2], screendata[test_pattern_offset + 3],
+		     screendata[test_pattern_offset + 2], screendata[test_pattern_offset + 1],
+		     screendata[test_pattern_offset + 0]);
+		LOGI("  center(%d,%d) XRGB32[B,G,R,A]: [%d,%d,%d,%d] => RGB(%d,%d,%d)",
 		     screenwidth/2, screenheight/2,
 		     screendata[center_offset + 0], screendata[center_offset + 1],
-		     screendata[center_offset + 2], screendata[center_offset + 3]);
+		     screendata[center_offset + 2], screendata[center_offset + 3],
+		     screendata[center_offset + 2], screendata[center_offset + 1],
+		     screendata[center_offset + 0]);
 	}
 	call_count++;
 
@@ -367,8 +380,15 @@ flushmemscreen(Rectangle r)
 	glBindTexture(GL_TEXTURE_2D, texture);
 	check_gl_error("glBindTexture");
 
-	/* Use GL_RGBA - screendata should be in RGBA byte order */
-	/* The drawing code needs to convert from XRGB32 to RGBA */
+	/*
+	 * CRITICAL FIX: Pixel format handling for XRGB32
+	 *
+	 * XRGB32 format (in memory, little-endian): B, G, R, A (bytes 0-3)
+	 * GL_RGBA format (expected by OpenGL): R, G, B, A
+	 *
+	 * OpenGL ES 2.0 doesn't support GL_BGRA directly, so we use GL_RGBA
+	 * and do the BGRA->RGBA conversion in the fragment shader using .bgra swizzle.
+	 */
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenwidth, screenheight,
 	             0, GL_RGBA, GL_UNSIGNED_BYTE, screendata);
 	check_gl_error("glTexImage2D");
@@ -597,30 +617,34 @@ android_initdisplay(void (*error)(Display*, char*))
 	}
 
 	/* Draw a test pattern directly to screendata to verify rendering */
+	/*
+	 * IMPORTANT: XRGB32 format stores pixels as B,G,R,A in memory (little-endian)
+	 * So we must write: offset+0=B, offset+1=G, offset+2=R, offset+3=A
+	 */
 	if(screendata != nil && screenwidth > 200 && screenheight > 200) {
 		/* Draw a colored test pattern */
 		/* Top-left: white (already there from win_init) */
-		/* (100,100)-(200,200): Green */
+		/* (100,100)-(200,200): Green - in XRGB32: B=0, G=255, R=0 */
 		for(int y = 100; y < 200; y++) {
 			for(int x = 100; x < 200; x++) {
 				int offset = (y * screenwidth + x) * 4;
-				screendata[offset + 0] = 0;   /* R */
+				screendata[offset + 0] = 0;   /* B */
 				screendata[offset + 1] = 255; /* G */
-				screendata[offset + 2] = 0;   /* B */
+				screendata[offset + 2] = 0;   /* R */
 				screendata[offset + 3] = 255; /* A */
 			}
 		}
-		/* (200,200)-(300,300): Blue */
+		/* (200,200)-(300,300): Blue - in XRGB32: B=255, G=0, R=0 */
 		for(int y = 200; y < 300; y++) {
 			for(int x = 200; x < 300; x++) {
 				int offset = (y * screenwidth + x) * 4;
-				screendata[offset + 0] = 0;   /* R */
+				screendata[offset + 0] = 255; /* B */
 				screendata[offset + 1] = 0;   /* G */
-				screendata[offset + 2] = 255; /* B */
+				screendata[offset + 2] = 0;   /* R */
 				screendata[offset + 3] = 255; /* A */
 			}
 		}
-		LOGI("android_initdisplay: Drew test pattern to screendata");
+		LOGI("android_initdisplay: Drew test pattern to screendata (XRGB32 format)");
 
 		/* Also try drawing to screenimage using memdraw to verify that path works */
 		extern Memimage *screenimage;
@@ -629,11 +653,12 @@ android_initdisplay(void (*error)(Display*, char*))
 		if(screenimage != nil && screenwidth > 400 && screenheight > 400) {
 			/* Try to draw a red square using memimagedraw */
 			/* First create a simple red square in memory */
+			/* Red in XRGB32: B=0, G=0, R=255 */
 			static uchar red_square_data[16*16*4];  /* 16x16 red square */
 			for(int i = 0; i < 16*16*4; i += 4) {
-				red_square_data[i+0] = 255; /* R */
+				red_square_data[i+0] = 0;   /* B */
 				red_square_data[i+1] = 0;   /* G */
-				red_square_data[i+2] = 0;   /* B */
+				red_square_data[i+2] = 255; /* R */
 				red_square_data[i+3] = 255; /* A */
 			}
 
@@ -643,9 +668,9 @@ android_initdisplay(void (*error)(Display*, char*))
 			for(int y = 300; y < 316; y++) {
 				for(int x = 300; x < 316; x++) {
 					int offset = (y * screenwidth + x) * 4;
-					screendata[offset + 0] = 255; /* R */
+					screendata[offset + 0] = 0;   /* B */
 					screendata[offset + 1] = 0;   /* G */
-					screendata[offset + 2] = 0;   /* B */
+					screendata[offset + 2] = 255; /* R */
 					screendata[offset + 3] = 255; /* A */
 				}
 			}
@@ -841,12 +866,13 @@ win_init(struct android_app* app)
 			/* Initialize to black background */
 			memset(screendata, 0, screensize);
 			/* Draw a small white square in the top-left corner to verify rendering */
+			/* White in XRGB32: B=255, G=255, R=255 */
 			for(int y = 0; y < 100; y++) {
 				for(int x = 0; x < 100; x++) {
 					int offset = (y * screenwidth + x) * 4;
-					screendata[offset + 0] = 255; /* R */
+					screendata[offset + 0] = 255; /* B */
 					screendata[offset + 1] = 255; /* G */
-					screendata[offset + 2] = 255; /* B */
+					screendata[offset + 2] = 255; /* R */
 					screendata[offset + 3] = 255; /* A */
 				}
 			}

@@ -9,18 +9,23 @@ include "lexer.m";
 # Token constructor functions (not methods, just helpers)
 create_token(typ: int, lineno: int): ref Token
 {
-    return ref Token (typ, "", big 0, lineno);
+    return ref Token (typ, "", big 0, 0.0, lineno);
 }
 
 create_string_token(typ: int, s: string, lineno: int): ref Token
 {
-    tok := ref Token (typ, s, big 0, lineno);
+    tok := ref Token (typ, s, big 0, 0.0, lineno);
     return tok;
 }
 
 create_number_token(n: big, lineno: int): ref Token
 {
-    return ref Token (TOKEN_NUMBER, "", n, lineno);
+    return ref Token (TOKEN_NUMBER, "", n, 0.0, lineno);
+}
+
+create_real_token(r: real, lineno: int): ref Token
+{
+    return ref Token (TOKEN_REAL, "", big 0, r, lineno);
 }
 
 # Public interface implementations
@@ -90,6 +95,14 @@ skip_whitespace(l: ref LexerObj)
             }
         }
 
+        # Check for # comments
+        if (c == '#') {
+            # Skip to end of line
+            while (peek_char(l) != -1 && peek_char(l) != '\n')
+                next_char(l);
+            continue;  # Restart loop to get next character
+        }
+
         if (c == ' ' || c == '\t' || c == '\r') {
             next_char(l);
             continue;  # Restart loop to get next character
@@ -139,21 +152,47 @@ read_string_literal(l: ref LexerObj): (string, string)
     return (nil, sys->sprint("unterminated string at line %d", start_line));
 }
 
-# Read a number literal
-read_number(l: ref LexerObj): big
+# Read a number literal - returns (is_real, int_val, real_val)
+read_number(l: ref LexerObj): (int, big, real)
 {
-    val := big 0;
+    int_val := big 0;
+    is_real := 0;
+    real_val := 0.0;
 
+    # Read integer part
     while (l.pos < len l.src_data) {
         c := peek_char(l);
         if (c < '0' || c > '9')
             break;
 
-        val = val * big 10 + big (c - '0');
+        int_val = int_val * big 10 + big (c - '0');
         next_char(l);
     }
 
-    return val;
+    # Check for decimal point
+    if (peek_char(l) == '.') {
+        is_real = 1;
+        next_char(l);  # consume '.'
+
+        # Read fractional part
+        frac := 0.0;
+        divisor := 10.0;
+
+        while (l.pos < len l.src_data) {
+            c := peek_char(l);
+            if (c < '0' || c > '9')
+                break;
+
+            frac = frac + real (c - '0') / divisor;
+            divisor *= 10.0;
+            next_char(l);
+        }
+
+        real_val = real int_val + frac;
+        return (is_real, int_val, real_val);
+    }
+
+    return (is_real, int_val, real_val);
 }
 
 # Read an identifier
@@ -207,6 +246,18 @@ check_keyword(id: string): int
     # Keywords
     if (id == "var") return TOKEN_VAR;
     if (id == "fn") return TOKEN_FN;
+    if (id == "const") return TOKEN_CONST;
+    if (id == "struct") return TOKEN_STRUCT;
+    if (id == "type") return TOKEN_TYPE;
+    if (id == "chan") return TOKEN_CHAN;
+    if (id == "spawn") return TOKEN_SPAWN;
+    if (id == "of") return TOKEN_OF;
+    if (id == "array") return TOKEN_ARRAY;
+    if (id == "if") return TOKEN_IF;
+    if (id == "else") return TOKEN_ELSE;
+    if (id == "for") return TOKEN_FOR;
+    if (id == "while") return TOKEN_WHILE;
+    if (id == "return") return TOKEN_RETURN;
 
     # Widget types
     if (id == "Window") return TOKEN_WINDOW;
@@ -361,8 +412,10 @@ lex(l: ref LexerObj): ref Token
 
     # Number
     if (c >= '0' && c <= '9') {
-        val := read_number(l);
-        return create_number_token(val, lineno);
+        (is_real, int_val, real_val) := read_number(l);
+        if (is_real)
+            return create_real_token(real_val, lineno);
+        return create_number_token(int_val, lineno);
     }
 
     # Identifier or keyword

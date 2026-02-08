@@ -1,0 +1,145 @@
+.TH KRYON 1
+.SH NAME
+kryon \- Kryon language compiler
+.SH SYNOPSIS
+.B kryon
+[
+.B -o
+.I output
+]
+[
+.B -h
+]
+.I input.kry
+.SH DESCRIPTION
+.I Kryon
+is a declarative UI language for building Inferno applications.
+It compiles
+.I .kry
+source files into Limbo
+.I .b
+source files, which can then be compiled with
+.IR limbo (1)
+to produce Dis executables.
+.PP
+The Kryon language provides a simple, intuitive syntax for defining
+user interfaces using widgets similar to Tk, with support for
+reactive properties, event handlers, and automatic layout management.
+.PP
+The compiler takes a Kryon source file and generates equivalent
+Limbo code that uses the Tk and wmclient libraries to create
+the specified user interface.
+.SH OPTIONS
+.TP
+.B -o \fIoutput\fP
+Specify the output file name.
+If not provided, the output file name is derived from the input
+file name by replacing the
+.B .kry
+extension with
+.BR .b .
+.TP
+.B -h
+Print a usage message and exit.
+.SH EXAMPLES
+Compile a Kryon source file to Limbo:
+.EX
+kryon hello.kry
+.EE
+.PP
+Compile with specific output name:
+.EX
+kryon -o myapp.b hello.kry
+.EE
+.PP
+Compile and then build the Dis executable:
+.EX
+kryon hello.kry && limbo hello.b
+.EE
+.SH LANGUAGE OVERVIEW
+A Kryon source file defines a single Window containing a hierarchy
+of widgets. The basic structure is:
+.PP
+.EX
+Window {
+    title = "My Application"
+    width = 400
+    height = 300
+    bg = "#191919"
+
+    // Widgets go here
+    Label {
+        text = "Hello, World!"
+        fg = "white"
+    }
+}
+.EE
+.PP
+For complete language documentation, see
+.IR kryon (7).
+.SH WIDGETS
+Kryon provides the following built-in widgets:
+.TP
+.B Button
+Clickable button with text label.
+.TP
+.B Canvas
+Drawing area for custom graphics.
+.TP
+.B Checkbutton
+Checkbox with on/off state.
+.TP
+.B Column
+Vertical container for child widgets.
+.TP
+.B Entry
+Single-line text input field.
+.TP
+.B Frame
+Generic container with border options.
+.TP
+.B Img
+Image display widget.
+.TP
+.B Label
+Text display widget.
+.TP
+.B Listbox
+Scrollable list of items.
+.TP
+.B Menubutton
+Dropdown menu button.
+.TP
+.B Message
+Multi-line text display.
+.TP
+.B Radiobutton
+Radio button for exclusive selection groups.
+.TP
+.B Row
+Horizontal container for child widgets.
+.TP
+.B Scale
+Slider for numeric value selection.
+.SH FILES
+.TF /dis/kryon.dis
+.TP
+.B /dis/kryon.dis
+The Kryon compiler executable.
+.TP
+.B /appl/cmd/kryon/kryon.b
+Compiler source code.
+.TP
+.B /appl/kryon/
+Example Kryon applications.
+.SH SOURCE
+.B /appl/cmd/kryon
+.SH "SEE ALSO"
+.IR limbo (1),
+.IR wm (1),
+.IR tk (2),
+.IR kryon (7)
+.SH BUGS
+Error messages report line numbers from the generated Limbo code
+rather than the original Kryon source when compilation fails
+in the second stage.

@@ -1,7 +1,10 @@
 <$ROOT/mkconfig
 
+KRYON=/dis/kryon.dis
+
 KRYFILES=\
 	about.kry\
+	bounce.kry\
 	clock.kry\
 	date.kry\
 
@@ -11,8 +14,8 @@ DISFILES=${KRYFILES:%.kry=%.dis}
 
 all:V:	$BFILES $DISFILES
 
-%.b:	%.kry	/dis/kryon.dis
-	/dis/kryon.dis $stem.kry
+%.b:	%.kry	$KRYON
+	limbo $KRYON $stem.kry
 
 %.dis:	%.b
 	limbo -g $stem.b
