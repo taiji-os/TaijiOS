@@ -1,24 +1,24 @@
-use math
+use math;
 
 # Type declarations for bouncing balls
 struct Realpoint {
-    x: real
-    y: real
-}
+    x: real;
+    y: real;
+};
 
 struct Line {
-    p1: Realpoint
-    p2: Realpoint
-}
+    p1: Realpoint;
+    p2: Realpoint;
+};
 
 # Constants
-const BALLSIZE = 4
-const ZERO = 1e-6
+const BALLSIZE = 4;
+const ZERO = 1e-6;
 
 # Global state
-var lines: list of Line
-var drawing: int = 0
-var lineStart: Realpoint
+var lines: Line[];
+var drawing: int = 0;
+var lineStart: Realpoint;
 
 # Physics functions
 fn makeunit(v: Realpoint): Realpoint {
@@ -53,15 +53,14 @@ fn handleMouseMove(x: int, y: int) {
 # Main animation callback using Graphics API
 fn animate(ctx: Graphics, t: int) {
     # Clear screen with light blue background
-    ctx.clear("#d4f7f4")
+    ctx.clear("#d4f7f4");
 
     # Set stroke color for lines
-    ctx.stroke(Color.black)
-    ctx.setlinewidth(3)
+    ctx.stroke(Color.black);
+    ctx.setlinewidth(3);
 
     # Draw lines
-    for (var ls: list of Line = lines; ls != nil; ls = tl ls) {
-        l: Line = hd ls;
+    for (l in lines) {
         ctx.line(int l.p1.x, int l.p1.y, int l.p2.x, int l.p2.y);
     }
 }

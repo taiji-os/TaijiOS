@@ -460,7 +460,7 @@ wm_init(void)
 {
 	Wmcontext* wm;
 
-	LOGI("wm_init: Initializing Window Manager subsystem");
+	LOGI("wm_init: ENTRY - Initializing Window Manager subsystem");
 
 	/* Create a default wmcontext for Android */
 	wm = wmcontext_create(nil);
@@ -473,7 +473,8 @@ wm_init(void)
 	wmcontext_set_active(wm);
 
 	__android_log_print(ANDROID_LOG_INFO, "TaijiOS", "wm_init: SUCCESS wmcontext %p created", wm);
-	LOGI("wm_init: Default wmcontext %p created and set as active", wm);
+	LOGI("wm_init: Default wmcontext %p created and set as active, queues: kbd=%p ptr=%p ctl=%p",
+	     wm, wm->kbd, wm->ptr, wm->ctl);
 }
 
 /*

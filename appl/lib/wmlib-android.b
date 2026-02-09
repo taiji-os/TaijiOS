@@ -36,11 +36,13 @@ init()
 # Create a Draw context with Android display
 makedrawcontext(): ref Draw->Context
 {
+	sys->fprint(sys->fildes(2), "wmlib-android: makedrawcontext ENTRY - calling Display.allocate(nil)\n");
 	display := Display.allocate(nil);
 	if(display == nil){
 		sys->fprint(sys->fildes(2), "wmlib-android: can't allocate Display: %r\n");
 		raise "fail:no display";
 	}
+	sys->fprint(sys->fildes(2), "wmlib-android: makedrawcontext - Display allocated successfully\n");
 	return ref Draw->Context(display, nil, nil);
 }
 

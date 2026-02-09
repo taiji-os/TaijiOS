@@ -87,8 +87,11 @@ wmctx_kbd_read(Chan* c, void* a, long n, vlong off)
 	/* Ensure wmcontext exists */
 	wm = ensure_wmcontext();
 	if(wm == nil) {
+		LOGE("wmctx_kbd_read: ensure_wmcontext failed");
 		return 0;
 	}
+
+	LOGI("wmctx_kbd_read: Waiting for keyboard event on wmcontext %p", wm);
 
 	/* Read from queue (blocks until data available) */
 	if(wmcontext_recv_kbd(wm, &key) == 0) {
@@ -132,8 +135,11 @@ wmctx_ptr_read(Chan* c, void* a, long n, vlong off)
 	/* Ensure wmcontext exists */
 	wm = ensure_wmcontext();
 	if(wm == 0) {
+		LOGE("wmctx_ptr_read: ensure_wmcontext failed");
 		return 0;
 	}
+
+	LOGI("wmctx_ptr_read: Waiting for pointer event on wmcontext %p", wm);
 
 	/* Read from queue (blocks until data available) */
 	ptr = wmcontext_recv_ptr(wm);
@@ -175,8 +181,11 @@ wmctx_ctl_read(Chan* c, void* a, long n, vlong off)
 	/* Ensure wmcontext exists */
 	wm = ensure_wmcontext();
 	if(wm == 0) {
+		LOGE("wmctx_ctl_read: ensure_wmcontext failed");
 		return 0;
 	}
+
+	LOGI("wmctx_ctl_read: Waiting for control message on wmcontext %p", wm);
 
 	/* Read from queue (blocks until data available) */
 	msg = wmcontext_recv_ctl(wm);

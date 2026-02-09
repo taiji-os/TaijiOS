@@ -21,6 +21,7 @@ set(LIB9 ${TAIJIOS_ROOT}/lib9)
 set(LIBINTERP ${TAIJIOS_ROOT}/libinterp)
 set(LIBDRAW ${TAIJIOS_ROOT}/libdraw)
 set(LIBMEMDRAW ${TAIJIOS_ROOT}/libmemdraw)
+set(LIBMEMLAYER ${TAIJIOS_ROOT}/libmemlayer)
 set(LIBTK ${TAIJIOS_ROOT}/libtk)
 set(LIBSEC ${TAIJIOS_ROOT}/libsec)
 set(LIBMP ${TAIJIOS_ROOT}/libmp)
@@ -35,6 +36,7 @@ include_directories(
 	${LIBINTERP}
 	${LIBDRAW}
 	${LIBMEMDRAW}
+	${LIBMEMLAYER}
 	${LIBTK}
 	${LIBSEC}
 	${LIBMP}
@@ -218,6 +220,8 @@ file(GLOB_RECURSE LIBDRAW_SOURCES
 list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*x11.*")
 list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*winx.*")
 list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*test\\.c")
+# Exclude localdraw.c - it's broken and not needed
+list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*localdraw\\.c")
 # Exclude files that conflict with libinterp/draw.c wrappers
 list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*freesubfont\\.c")
 list(FILTER LIBDRAW_SOURCES EXCLUDE REGEX ".*subfontcache\\.c")
@@ -229,6 +233,23 @@ file(GLOB_RECURSE LIBMEMDRAW_SOURCES
 )
 list(FILTER LIBMEMDRAW_SOURCES EXCLUDE REGEX ".*openmemsubfont.*")
 list(FILTER LIBMEMDRAW_SOURCES EXCLUDE REGEX ".*drawtest.*")
+
+# libmemlayer source files - only include non-X11 files
+# These are needed for the memdraw function
+set(LIBMEMLAYER_SOURCES
+	${LIBMEMLAYER}/draw.c
+	${LIBMEMLAYER}/lalloc.c
+	${LIBMEMLAYER}/layerop.c
+	${LIBMEMLAYER}/ldelete.c
+	${LIBMEMLAYER}/lhide.c
+	${LIBMEMLAYER}/line.c
+	${LIBMEMLAYER}/load.c
+	${LIBMEMLAYER}/lorigin.c
+	${LIBMEMLAYER}/lsetrefresh.c
+	${LIBMEMLAYER}/ltofront.c
+	${LIBMEMLAYER}/ltorear.c
+	${LIBMEMLAYER}/unload.c
+)
 
 # libtk source files
 file(GLOB_RECURSE LIBTK_SOURCES
@@ -288,6 +309,7 @@ set(TAIJIOS_SOURCES
 	# Graphics libraries - testing for Phase 2
 	${LIBDRAW_SOURCES}
 	${LIBMEMDRAW_SOURCES}
+	${LIBMEMLAYER_SOURCES}
 	${LIBTK_SOURCES}
 	${LIBSEC_SOURCES}
 	${LIBMP_SOURCES}

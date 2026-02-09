@@ -4,6 +4,10 @@
 #include "memlayer.h"
 #include "pool.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 struct Draw
 {
 	Point	deltas;
@@ -57,6 +61,12 @@ memdraw(Memimage *dst, Rectangle r, Memimage *src, Point p0, Memimage *mask, Poi
 	Rectangle srcr, tr, mr;
 	Memlayer *dl, *sl;
 
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+		"memdraw: ENTRY dst=%p, r=(%d,%d)-(%d,%d), src=%p, p0=(%d,%d), mask=%p, p1=(%d,%d), op=%d",
+		dst, r.min.x, r.min.y, r.max.x, r.max.y, src, p0.x, p0.y, mask, p1.x, p1.y, op);
+#endif
+
 	if(drawdebug)
 		iprint("memdraw %p %R %p %P %p %P\n", dst, r, src, p0, mask, p1);
 
@@ -68,9 +78,44 @@ if(drawdebug)	iprint("mask->layer != nil\n");
 		return;	/* too hard, at least for now */
 	}
 
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+		"memdraw: dst->layer=%p, src->layer=%p, mask->layer=%p",
+		dst->layer, src->layer, mask->layer);
+#endif
+
     Top:
 	if(dst->layer==nil && src->layer==nil){
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: calling memimagedraw (no layers)");
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: dst data=%p, src data=%p, dst->data=%p, src->data=%p",
+			(dst->data ? dst->data->bdata : 0), (src->data ? src->data->bdata : 0), dst->data, src->data);
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: dst chan=0x%x, src chan=0x%x", dst->chan, src->chan);
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: dst->r=(%d,%d)-(%d,%d), dst->clipr=(%d,%d)-(%d,%d)",
+			dst->r.min.x, dst->r.min.y, dst->r.max.x, dst->r.max.y,
+			dst->clipr.min.x, dst->clipr.min.y, dst->clipr.max.x, dst->clipr.max.y);
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: src->r=(%d,%d)-(%d,%d), src->clipr=(%d,%d)-(%d,%d)",
+			src->r.min.x, src->r.min.y, src->r.max.x, src->r.max.y,
+			src->clipr.min.x, src->clipr.min.y, src->clipr.max.x, src->clipr.max.y);
+#endif
 		memimagedraw(dst, r, src, p0, mask, p1, op);
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+			"memdraw: memimagedraw returned");
+		/* Sample center pixel to see if it changed */
+		if(dst->data && dst->data->bdata && dst->width > 0) {
+			int center_offset = (1140 * dst->width + 540) * 4;
+			uchar *pixel = (uchar*)dst->data->bdata + dst->zero + center_offset;
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memdraw",
+				"memdraw: center pixel B,G,R,A = [%d,%d,%d,%d]",
+				pixel[0], pixel[1], pixel[2], pixel[3]);
+		}
+#endif
 		return;
 	}
 

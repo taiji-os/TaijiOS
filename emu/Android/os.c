@@ -325,15 +325,13 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Testing Tk modules to trigger crash for debugging */
+	/* Testing wmctx devices and window manager */
 	static const char* test_modules[] = {
-		/* "dis/testsimple.dis",  Simple test that just prints */
-		/* "dis/testprint.dis",   Test printing */
-		/* "dis/testsleep.dis",   Test sleep */
-		/* "dis/testload.dis",    Minimal Draw module test */
-		/* "dis/testnobox.dis", */
-		/* "dis/testwm.dis", */
-		/* Testing Tk modules - these should trigger the crash */
+		"dis/simpledraw.dis",   /* Simple draw test - Display.allocate + direct drawing */
+		"dis/directdraw.dis",   /* Direct drawing test - bypasses wmlib */
+		"dis/testsimple.dis",   /* Simple test - verify VM execution */
+		"dis/testprint.dis",    /* Test printing */
+		"dis/testwm.dis",       /* Test wmctx devices */
 		"dis/minimal.dis",      /* Minimal Tk module */
 		"dis/clock.dis",        /* Clock application - complex Tk */
 		NULL
@@ -617,121 +615,13 @@ int vflag = 0;
 
 /* setid is in emu/port/devfs-posix.c */
 
-void
-memldelete(Memimage *m)
-{
-	USED(m);
-}
-
-void
-memlfree(Memimage *m)
-{
-	USED(m);
-}
-
 /* attachscreen is in emu/Android/win.c */
 
 /* Sleep and Wakeup are implemented in emu/port/proc.c */
 
-int
-memlnorefresh(Memimage *m)
-{
-	USED(m);
-	return 0;
-}
-
-int
-memlinealloc(int w, int h, int fill)
-{
-	USED(w);
-	USED(h);
-	USED(fill);
-	return 0;
-}
-
-Point
-memlorigin(Memimage *m)
-{
-	USED(m);
-	Point p = {0, 0};
-	return p;
-}
-
-int
-memunload(Memimage *m, Rectangle r, uchar *data, int n)
-{
-	USED(m);
-	(void)r;
-	USED(data);
-	return n;
-}
-
-void
-memdraw(Memimage *dst, Rectangle r, Memimage *src, Point p0, int op)
-{
-	USED(dst);
-	(void)r;
-	USED(src);
-	(void)p0;
-	USED(op);
-}
-
-Memimage*
-memlalloc(int w, int h, int fill)
-{
-	USED(w);
-	USED(h);
-	USED(fill);
-	return H;
-}
-
-void
-memlsetrefresh(Memimage *m, void (*refresh)(Memimage*, Rectangle), Rectangle r)
-{
-	USED(m);
-	USED(refresh);
-	(void)r;
-}
-
-int
-memline(Memimage *dst, Point p0, Point p1, int end0, int end1, int radius, Memimage *src, Point sp, int op, int zop, int clip)
-{
-	USED(dst);
-	(void)p0;
-	(void)p1;
-	USED(end0);
-	USED(end1);
-	USED(radius);
-	USED(src);
-	(void)sp;
-	USED(op);
-	USED(zop);
-	USED(clip);
-	return 0;
-}
-
-void
-memltofrontn(Memimage **mip, int n)
-{
-	USED(mip);
-	USED(n);
-}
-
-void
-memltorearn(Memimage **mip, int n)
-{
-	USED(mip);
-	USED(n);
-}
-
-int
-memload(Memimage *m, Rectangle r, uchar *data, int n)
-{
-	USED(m);
-	(void)r;
-	USED(data);
-	return n;
-}
+/* memdraw, memlalloc, memldelete, memlfree, memline, memlinealloc, memload, memlorigin, */
+/* memlnorefresh, memlsetrefresh, memltofrontn, memltorear, memunload, memlexpose, memlhide */
+/* are now provided by libmemlayer - stubs removed to avoid duplicate symbols */
 
 /* flushmemscreen is in emu/Android/win.c */
 

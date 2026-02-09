@@ -148,7 +148,8 @@ is_compound_operator(toktype: int): int
     if (toktype == '+' + 256 || toktype == '-' + 256 || toktype == '=' + 256 ||
         toktype == '!' + 256 || toktype == '<' + 256 || toktype == '>' + 256 ||
         toktype == '+' + 512 || toktype == '-' + 512 ||
-        toktype == '*' + 256 || toktype == '/' + 256 || toktype == '%' + 256)
+        toktype == '*' + 256 || toktype == '/' + 256 || toktype == '%' + 256 ||
+        toktype == ':' + 256)
         return 1;
     return 0;
 }
@@ -214,6 +215,8 @@ token_to_string(tok: ref Token): string
         return "while";
     if (tt == Lexer->TOKEN_RETURN)
         return "return";
+    if (tt == Lexer->TOKEN_IN)
+        return "in";
     if (tt == '+' + 256)
         return "+=";
     if (tt == '-' + 256)
@@ -258,6 +261,13 @@ parse_use_statement(p: ref Parser): (ref ModuleImport, string)
         return (nil, err2);
     }
     module_name := module_tok.string_val;
+
+    # Require ';' after use statement
+    tok := p.peek();
+    if (tok.toktype != ';') {
+        return (nil, fmt_error(p, "use statement must end with semicolon"));
+    }
+    p.next();  # consume ';'
 
     return (ast->moduleimport_create(module_name, ""), nil);
 }
@@ -467,16 +477,26 @@ parse_const_decl(p: ref Parser): (ref Ast->ConstDecl, string)
         return (nil, fmt_error(p, "expected '=' after constant name"));
     }
 
-    # Parse value until newline or semicolon
+    # Parse value until semicolon (required)
     value := "";
 
     while (p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
         tok := p.peek();
 
-        # Stop at newline or semicolon
-        if (tok.toktype == '\n' || tok.toktype == ';') {
-            p.next();  # consume the newline or semicolon
+        # Stop at semicolon (required)
+        if (tok.toktype == ';') {
+            p.next();  # consume the semicolon
             break;
+        }
+
+        # Stop at any keyword (signals end of const declaration without semicolon)
+        if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_IN) {
+            return (nil, fmt_error(p, "const declaration must end with semicolon"));
+        }
+
+        # Stop at widget type keywords
+        if (tok.toktype >= Lexer->TOKEN_WINDOW && tok.toktype <= Lexer->TOKEN_IMG) {
+            return (nil, fmt_error(p, "const declaration must end with semicolon"));
         }
 
         tok = p.next();  # actually consume the token
@@ -577,9 +597,12 @@ parse_struct_decl(p: ref Parser): (ref StructDecl, string)
             ast->structfield_list_add(fields, field);
         }
 
-        # Expect ';'
-        if (p.peek().toktype == ';')
-            p.next();  # consume ';'
+        # Require ';' after struct field
+        tok := p.peek();
+        if (tok.toktype != ';') {
+            return (nil, fmt_error(p, "struct field must end with semicolon"));
+        }
+        p.next();  # consume ';'
     }
 
     decl.fields = fields;
@@ -589,6 +612,13 @@ parse_struct_decl(p: ref Parser): (ref StructDecl, string)
     if (err6 != nil) {
         return (nil, err6);
     }
+
+    # Require ';' after struct declaration
+    tok := p.peek();
+    if (tok.toktype != ';') {
+        return (nil, fmt_error(p, "struct declaration must end with semicolon"));
+    }
+    p.next();  # consume ';'
 
     return (decl, nil);
 }
@@ -607,14 +637,15 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
     # Check for ':' (typed declaration) or '=' (initializer)
     next_tok := p.peek();
     if (next_tok.toktype == ':') {
-        # Typed declaration: var name: type
+        # Typed declaration: var name: type [= value]
         p.next();  # consume ':'
 
         # Parse type (could be "ref Image", "int", "string", "ref Image[]", etc.)
-        # Stop at semicolon or any keyword (fn, var, Window, etc.)
+        # Stop at semicolon, '=', or any keyword (fn, var, Window, etc.)
         type_str := "";
         while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
-               p.peek().toktype != ';') {
+               p.peek().toktype != ';' &&
+               p.peek().toktype != '=') {
             tok := p.peek();
             # Stop if we hit a keyword (these signal end of type declaration)
             if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_CONST)
@@ -624,13 +655,13 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
 
             p.next();  # consume the token
 
-            # Handle array syntax Type[]
+            # Handle array/list syntax Type[] -> generates "list of Type"
             if (tok.toktype == '[') {
                 # Check if next is ']'
                 if (p.peek().toktype == ']') {
                     p.next();  # consume ']'
-                    # type_str currently has the base type, need to convert to "array of Type"
-                    type_str = "array of " + type_str;
+                    # type_str currently has the base type, convert to "list of Type"
+                    type_str = "list of " + type_str;
                 } else {
                     type_str += "[";
                 }
@@ -641,7 +672,8 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
             }
             # Add space between tokens if needed
             if (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
-                p.peek().toktype != ';') {
+                p.peek().toktype != ';' &&
+                p.peek().toktype != '=') {
                 peek_tok := p.peek();
                 # Stop at keywords
                 if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CONST)
@@ -653,12 +685,60 @@ parse_var_decl(p: ref Parser): (ref Ast->VarDecl, string)
             }
         }
 
-        # Optional ';'
-        if (p.peek().toktype == ';')
-            p.next();  # consume ';'
+        # Convert Kryon *Type syntax to Limbo ref Type syntax
+        type_str = kryon_type_to_limbo(type_str);
 
-        # No initialization expression for typed declarations (value set in functions)
-        return (ast->var_decl_create(name, type_str, "", nil), nil);
+        # Check for optional initialization: = value
+        init_expr := "";
+        if (p.peek().toktype == '=') {
+            p.next();  # consume '='
+
+            # Parse initialization value
+            while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+                   p.peek().toktype != ';' &&
+                   p.peek().toktype != '\n') {
+                # Stop if we encounter a keyword (signals end of value)
+                peek_tok := p.peek();
+                if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CONST)
+                    break;
+
+                tok := p.next();
+                if (tok.toktype == Lexer->TOKEN_STRING) {
+                    init_expr += "\"" + limbo_escape(tok.string_val) + "\"";
+                } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                    init_expr += tok.string_val;
+                } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                    init_expr += sys->sprint("%bd", tok.number_val);
+                } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                    if (tok.real_val == real (big tok.real_val)) {
+                        init_expr += sys->sprint("%bd.0", big tok.real_val);
+                    } else {
+                        init_expr += sys->sprint("%g", tok.real_val);
+                    }
+                } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                    init_expr += "->";
+                } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                    init_expr += sys->sprint("%c", tok.toktype);
+                }
+
+                next_tok := p.peek();
+                if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                    next_tok.toktype != ';' &&
+                    next_tok.toktype != '\n' &&
+                    should_add_space(tok.toktype, next_tok.toktype)) {
+                    init_expr += " ";
+                }
+            }
+        }
+
+        # Require ';' after variable declaration
+        tok := p.peek();
+        if (tok.toktype != ';') {
+            return (nil, fmt_error(p, "variable declaration must end with semicolon"));
+        }
+        p.next();  # consume ';'
+
+        return (ast->var_decl_create(name, type_str, init_expr, nil), nil);
     }
 
     # Expect '=' (initializer style: var name = expr)
@@ -732,12 +812,35 @@ parse_statement(p: ref Parser): (ref Ast->Statement, string)
         return parse_block(p);
     }
 
+    # Check for local variable declaration: name : type or name := value
+    if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+        next := lexer->peek_token(p.l);
+        if (next != nil && (next.toktype == ':' || next.toktype == ':' + 256)) {
+            return parse_local_decl(p);
+        }
+    }
+
     # Default: expression statement
     return parse_expr_stmt(p);
 }
 
 # Parse a variable declaration statement: var name: type = value;
 parse_var_stmt(p: ref Parser): (ref Ast->Statement, string)
+{
+    (stmt, err) := parse_var_stmt_internal(p, 1);
+    return (stmt, err);
+}
+
+# Parse a variable declaration without requiring semicolon (for for-loop init)
+parse_var_stmt_no_semi(p: ref Parser): (ref Ast->Statement, string)
+{
+    (stmt, err) := parse_var_stmt_internal(p, 0);
+    return (stmt, err);
+}
+
+# Internal function to parse var declaration
+# require_semi: 1 to require semicolon, 0 to not require it
+parse_var_stmt_internal(p: ref Parser, require_semi: int): (ref Ast->Statement, string)
 {
     lineno := lexer->get_lineno(p.l);
 
@@ -758,24 +861,47 @@ parse_var_stmt(p: ref Parser): (ref Ast->Statement, string)
     if (err3 != nil)
         return (nil, err3);
 
-    # Expect type
-    (type_tok, err4) := p.expect(Lexer->TOKEN_IDENTIFIER);
-    if (err4 != nil)
-        return (nil, err4);
+    # Parse type (could include -> for ref types like daytime->Tm)
+    # Read until '=', ';', or newline
+    typ := "";
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+           p.peek().toktype != '=' &&
+           p.peek().toktype != ';' &&
+           p.peek().toktype != '\n') {
+        tok := p.next();
 
-    typ := type_tok.string_val;
+        if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            typ += tok.string_val;
+        } else if (tok.toktype == '[') {
+            # Array syntax Type[] - convert to "array of Type"
+            if (p.peek().toktype == ']') {
+                p.next();  # consume ']'
+                typ = "array of " + typ;
+            } else {
+                typ += "[";
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            typ += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            typ += sys->sprint("%c", tok.toktype);
+        }
 
-    # Check for array type: type[]
-    init_expr := "";
-    if (p.peek().toktype == '[') {
-        p.next();  # consume '['
-        (bracket_tok, err5) := p.expect(']');
-        if (err5 != nil)
-            return (nil, err5);
-        typ = "array of " + typ;
+        # Add space between tokens if needed
+        if (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+            p.peek().toktype != '=' &&
+            p.peek().toktype != ';' &&
+            p.peek().toktype != '\n') {
+            peek_tok := p.peek();
+            if (should_add_space(tok.toktype, peek_tok.toktype))
+                typ += " ";
+        }
     }
 
+    # Convert Kryon *Type syntax to Limbo ref Type syntax
+    typ = kryon_type_to_limbo(typ);
+
     # Check for initialization
+    init_expr := "";
     if (p.peek().toktype == '=') {
         p.next();  # consume '='
 
@@ -812,12 +938,272 @@ parse_var_stmt(p: ref Parser): (ref Ast->Statement, string)
         }
     }
 
-    # Consume optional semicolon
-    if (p.peek().toktype == ';')
+    # Optionally require ';' after local variable declaration
+    if (require_semi) {
+        tok := p.peek();
+        if (tok.toktype != ';') {
+            return (nil, fmt_error(p, "local variable declaration must end with semicolon"));
+        }
         p.next();
+    }
 
     var_decl := ast->var_decl_create(name, typ, init_expr, nil);
     return (ast->statement_create_vardecl(lineno, var_decl), nil);
+}
+
+# Parse a local variable declaration inside a function body:
+#   name: type [= value]   - typed declaration
+#   name := value          - type-inferred declaration
+# This version expects the identifier token to already be consumed
+parse_local_decl_internal(p: ref Parser, name: string, lineno: int): (ref Ast->Statement, string)
+{
+    # Check next token to determine declaration type
+    next_tok := p.peek();
+
+    if (next_tok.toktype == ':') {
+        # Typed declaration: name: type [= value]
+        p.next();  # consume ':'
+
+        # Parse type (could be "int", "string", "ref Image", "list of int", etc.)
+        type_str := "";
+        while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+               p.peek().toktype != '=' &&
+               p.peek().toktype != ';' &&
+               p.peek().toktype != '\n') {
+            tok := p.peek();
+            # Stop at keywords
+            if (tok.toktype >= Lexer->TOKEN_VAR && tok.toktype <= Lexer->TOKEN_CONST)
+                break;
+            if (tok.toktype == Lexer->TOKEN_AT || tok.toktype == Lexer->TOKEN_ARROW)
+                break;
+
+            p.next();  # consume the token
+
+            # Handle array/list syntax Type[]
+            if (tok.toktype == '[') {
+                if (p.peek().toktype == ']') {
+                    p.next();  # consume ']'
+                    type_str = "array of " + type_str;
+                } else {
+                    type_str += "[";
+                }
+            } else if (tok.toktype == ']') {
+                # Skip closing bracket if not consumed above
+                ;
+            } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                type_str += tok.string_val;
+            } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                type_str += sys->sprint("%c", tok.toktype);
+            }
+
+            # Add space if needed
+            if (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+                p.peek().toktype != '=' &&
+                p.peek().toktype != ';' &&
+                p.peek().toktype != '\n') {
+                peek_tok := p.peek();
+                if (peek_tok.toktype >= Lexer->TOKEN_VAR && peek_tok.toktype <= Lexer->TOKEN_CONST)
+                    break;
+                if (peek_tok.toktype == Lexer->TOKEN_AT || peek_tok.toktype == Lexer->TOKEN_ARROW)
+                    break;
+                if (should_add_space(tok.toktype, peek_tok.toktype))
+                    type_str += " ";
+            }
+        }
+
+        # Convert Kryon *Type syntax to Limbo ref Type syntax
+        type_str = kryon_type_to_limbo(type_str);
+
+        # Parse optional initialization: = value
+        init_expr := "";
+        if (p.peek().toktype == '=') {
+            p.next();  # consume '='
+            (val, _) := parse_init_value(p);
+            init_expr = val;
+        }
+
+        # Require ';' after typed local variable declaration
+        tok := p.peek();
+        if (tok.toktype != ';') {
+            return (nil, fmt_error(p, "local variable declaration must end with semicolon"));
+        }
+        p.next();  # consume ';'
+
+        var_decl := ast->var_decl_create(name, type_str, init_expr, nil);
+        return (ast->statement_create_vardecl(lineno, var_decl), nil);
+
+    } else if (next_tok.toktype == ':' + 256) {  # := token
+        # Type-inferred declaration: name := value
+        p.next();  # consume ':='
+
+        # Parse initialization value
+        (init_val, _) := parse_init_value(p);
+
+        # Infer type from init expression
+        inferred_type := infer_type_from_expr(init_val);
+
+        # Require ';' after type-inferred local variable declaration
+        tok := p.peek();
+        if (tok.toktype != ';') {
+            return (nil, fmt_error(p, "local variable declaration must end with semicolon"));
+        }
+        p.next();  # consume ';'
+
+        var_decl := ast->var_decl_create(name, inferred_type, init_val, nil);
+        return (ast->statement_create_vardecl(lineno, var_decl), nil);
+    }
+
+    return (nil, fmt_error(p, "expected ':' or ':=' after variable name"));
+}
+
+# Parse a local variable declaration inside a function body:
+#   name: type [= value]   - typed declaration
+#   name := value          - type-inferred declaration
+# This version consumes the identifier token
+parse_local_decl(p: ref Parser): (ref Ast->Statement, string)
+{
+    lineno := lexer->get_lineno(p.l);
+
+    # Expect identifier (variable name)
+    name_tok := p.next();
+    if (name_tok.toktype != Lexer->TOKEN_IDENTIFIER)
+        return (nil, fmt_error(p, "expected variable name"));
+
+    return parse_local_decl_internal(p, name_tok.string_val, lineno);
+}
+
+# Parse initialization value until semicolon or newline
+parse_init_value(p: ref Parser): (string, string)
+{
+    init_expr := "";
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+           p.peek().toktype != ';' &&
+           p.peek().toktype != '\n') {
+        tok := p.next();
+
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            init_expr += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            init_expr += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            init_expr += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            if (tok.real_val == real (big tok.real_val)) {
+                init_expr += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                init_expr += sys->sprint("%g", tok.real_val);
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            init_expr += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            init_expr += sys->sprint("%c", tok.toktype);
+        }
+
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+            next_tok.toktype != ';' &&
+            next_tok.toktype != '\n' &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            init_expr += " ";
+        }
+    }
+    return (init_expr, nil);
+}
+
+# Infer type from an expression string
+infer_type_from_expr(expr: string): string
+{
+    # Remove leading/trailing whitespace
+    if (expr == nil || len expr == 0)
+        return "string";  # default
+
+    # Check for string literals
+    if (expr[0] == '"')
+        return "string";
+
+    # Check for real numbers (contains decimal point or scientific notation)
+    has_decimal := 0;
+    for (i := 0; i < len expr; i++) {
+        c := expr[i];
+        if (c == '.') {
+            has_decimal = 1;
+            break;
+        }
+        if (c == 'e' && i + 1 < len expr && (expr[i + 1] == '+' || expr[i + 1] == '-')) {
+            has_decimal = 1;
+            break;
+        }
+    }
+    if (has_decimal)
+        return "real";
+
+    # Check for function calls that return specific types by looking for patterns
+    # Math->, ->sin, ->cos, ->sqrt, ->atan2 all indicate real
+    has_arrow := 0;
+    has_math := 0;
+    for (i = 0; i < len expr; i++) {
+        if (i < len expr - 1 && expr[i] == '-' && expr[i + 1] == '>')
+            has_arrow = 1;
+        if (i < len expr - 3 && expr[i] == 'M' && expr[i + 1] == 'a' &&
+            expr[i + 2] == 't' && expr[i + 3] == 'h')
+            has_math = 1;
+    }
+    if (has_arrow && (has_math || has_math_func(expr)))
+        return "real";
+
+    # Check for struct constructors: TypeName(...)
+    # Look for identifier followed by '(' that's not a known function
+    # Default to int for numeric literals
+    return "int";
+}
+
+# Check if expression contains a math function name
+has_math_func(expr: string): int
+{
+    funcs := array[] of {"sin", "cos", "tan", "sqrt", "atan2", "atan", "exp", "log", "pow"};
+    i := 0;
+    while (i < len funcs) {
+        if (contains_word(expr, funcs[i]))
+            return 1;
+        i++;
+    }
+    return 0;
+}
+
+# Check if string contains a whole word (not as substring of another word)
+contains_word(s: string, word: string): int
+{
+    word_len := len word;
+    s_len := len s;
+    i := 0;
+    while (i <= s_len - word_len) {
+        match := 1;
+        j := 0;
+        while (j < word_len) {
+            if (s[i + j] != word[j]) {
+                match = 0;
+                break;
+            }
+            j++;
+        }
+        if (match != 0) {
+            # Check character before and after to ensure it's a whole word
+            before_ok := (i == 0) || (is_alnum(s[i - 1]) == 0);
+            after_ok := (i + word_len >= s_len) || (is_alnum(s[i + word_len]) == 0);
+            if (before_ok != 0 && after_ok != 0)
+                return 1;
+        }
+        i++;
+    }
+    return 0;
+}
+
+# Check if character is alphanumeric
+is_alnum(c: int): int
+{
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+        return 1;
+    return 0;
 }
 
 # Parse a block: { statements }
@@ -834,15 +1220,19 @@ parse_block(p: ref Parser): (ref Ast->Statement, string)
     statements: ref Ast->Statement = nil;
 
     while (p.peek().toktype != '}' && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+        # Skip empty statements (extra semicolons)
+        if (p.peek().toktype == ';') {
+            p.next();
+            continue;
+        }
+
         (stmt, err) := parse_statement(p);
         if (err != nil)
             return (nil, err);
 
         statements = ast->statement_list_add(statements, stmt);
 
-        # Skip semicolons between statements
-        if (p.peek().toktype == ';')
-            p.next();
+        # Each statement parser consumes its own terminating semicolon
     }
 
     # Expect '}'
@@ -895,6 +1285,24 @@ parse_if_stmt(p: ref Parser): (ref Ast->Statement, string)
                 condition += "->";
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
                 condition += sys->sprint("%c", tok.toktype);
+            } else if (tok.toktype >= 256 && tok.toktype < 512) {
+                # Two-character compound operator (==, !=, <=, >=, +=, -=, *=, /=, %=)
+                c := tok.toktype - 256;
+                condition += sys->sprint("%c", c);
+                # Add second character based on first
+                if (c == '+') condition += "=";
+                else if (c == '-') condition += "=";
+                else if (c == '=') condition += "=";
+                else if (c == '!') condition += "=";
+                else if (c == '<') condition += "=";
+                else if (c == '>') condition += "=";
+                else if (c == '*') condition += "=";
+                else if (c == '/') condition += "=";
+                else if (c == '%') condition += "=";
+            } else if (tok.toktype >= 512) {
+                # ++ or -- operator
+                base := tok.toktype - 512;
+                condition += sys->sprint("%c%c", base, base);
             }
 
             # Add space for next token
@@ -933,15 +1341,14 @@ parse_if_stmt(p: ref Parser): (ref Ast->Statement, string)
             return (nil, err4);
     }
 
-    # Skip optional semicolon
-    if (p.peek().toktype == ';')
-        p.next();
-
+    # No semicolon needed after if statement with block - it's a complete statement
     return (ast->statement_create_if(lineno, condition, then_stmt, else_stmt), nil);
 }
 
-# Parse a for loop: for (init; condition; increment) { ... }
-# OR Limbo-style: for (var = list; var != nil; var = tl var) { ... }
+# Parse a for loop:
+#   - for-each: for (var in list) { ... }
+#   - C-style: for (init; condition; increment) { ... }
+#   - Limbo-style: for (var = list; var != nil; var = tl var) { ... }
 parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
 {
     lineno := lexer->get_lineno(p.l);
@@ -956,11 +1363,109 @@ parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
     if (err2 != nil)
         return (nil, err2);
 
+    # Check for for-each syntax: for (var in list)
+    # Look ahead to see if we have pattern: identifier 'in' expression
+    is_for_each := 0;
+    loop_var := "";
+    list_expr := "";
+
+    # Peek to see if we have a simple identifier (not 'var' keyword)
+    if (p.peek().toktype == Lexer->TOKEN_IDENTIFIER) {
+        # Save parser state to restore if not a for-each
+        var_tok := p.peek();
+        loop_var = var_tok.string_val;
+        p.next();  # consume the variable name
+
+        # Check if next token is 'in'
+        if (p.peek().toktype == Lexer->TOKEN_IN) {
+            is_for_each = 1;
+            p.next();  # consume 'in'
+
+            # Parse the list expression until ')'
+            paren_count := 1;
+            while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
+                tok := p.next();
+                if (tok.toktype == '(')
+                    paren_count++;
+                else if (tok.toktype == ')')
+                    paren_count--;
+
+                if (paren_count > 0) {
+                    if (tok.toktype == Lexer->TOKEN_STRING) {
+                        list_expr += "\"" + limbo_escape(tok.string_val) + "\"";
+                    } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+                        list_expr += tok.string_val;
+                    } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+                        list_expr += sys->sprint("%bd", tok.number_val);
+                    } else if (tok.toktype == Lexer->TOKEN_REAL) {
+                        if (tok.real_val == real (big tok.real_val)) {
+                            list_expr += sys->sprint("%bd.0", big tok.real_val);
+                        } else {
+                            list_expr += sys->sprint("%g", tok.real_val);
+                        }
+                    } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+                        list_expr += "->";
+                    } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+                        list_expr += sys->sprint("%c", tok.toktype);
+                    }
+
+                    next_tok := p.peek();
+                    if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+                        next_tok.toktype != ')' &&
+                        should_add_space(tok.toktype, next_tok.toktype)) {
+                        list_expr += " ";
+                    }
+                }
+            }
+        } else {
+            # Not a for-each, put back the token (we can't really put back, so handle differently)
+            # Fall through to regular for loop parsing
+        }
+    }
+
+    if (is_for_each) {
+        # Parse body (block or single statement)
+        body: ref Ast->Statement;
+        err6: string;
+        if (p.peek().toktype == '{') {
+            (body, err6) = parse_block(p);
+        } else {
+            (body, err6) = parse_statement(p);
+        }
+        if (err6 != nil)
+            return (nil, err6);
+
+        # Generate for-each as a traditional for loop
+        # init: for (ls := list; ls != nil; ls = tl ls) { var := hd ls; ... }
+        list_var_name := sys->sprint("ls__%s", loop_var);
+        condition := sys->sprint("%s != nil", list_var_name);
+        increment := sys->sprint("%s = tl %s", list_var_name, list_var_name);
+
+        # Create a var decl statement for the list iterator (ls__var := list)
+        # This ensures the variable is properly declared in the symbol table
+        list_var_decl := ast->var_decl_create(list_var_name, "", list_expr, nil);
+        list_var_stmt := ast->statement_create_vardecl(lineno, list_var_decl);
+
+        # Create a var decl statement for the loop variable
+        loop_var_decl := ast->var_decl_create(loop_var, "", "hd " + list_var_name, nil);
+        loop_var_stmt := ast->statement_create_vardecl(lineno, loop_var_decl);
+
+        # Prepend the loop var extraction to the body
+        # Create a new block with loop_var_stmt first, then original body
+        new_block := ast->statement_create_block(lineno, loop_var_stmt);
+        loop_var_stmt.next = body;
+
+        return (ast->statement_create_for(lineno, list_var_stmt,
+                 condition, increment, new_block), nil);
+    }
+
+    # Regular for loop: for (init; condition; increment) { ... }
     # Parse init statement (could be var declaration or expression)
     init: ref Ast->Statement = nil;
     err3: string;
     if (p.peek().toktype == Lexer->TOKEN_VAR) {
-        (init, err3) = parse_var_stmt(p);
+        # Parse var declaration without requiring semicolon (for loop will provide it)
+        (init, err3) = parse_var_stmt_no_semi(p);
     } else {
         # Parse expression until ';'
         init_expr := "";
@@ -1025,6 +1530,23 @@ parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
             condition += "->";
         } else if (tok.toktype >= 32 && tok.toktype <= 126) {
             condition += sys->sprint("%c", tok.toktype);
+        } else if (tok.toktype >= 256 && tok.toktype < 512) {
+            # Two-character compound operator
+            c := tok.toktype - 256;
+            condition += sys->sprint("%c", c);
+            if (c == '+') condition += "=";
+            else if (c == '-') condition += "=";
+            else if (c == '=') condition += "=";
+            else if (c == '!') condition += "=";
+            else if (c == '<') condition += "=";
+            else if (c == '>') condition += "=";
+            else if (c == '*') condition += "=";
+            else if (c == '/') condition += "=";
+            else if (c == '%') condition += "=";
+        } else if (tok.toktype >= 512) {
+            # ++ or -- operator
+            base := tok.toktype - 512;
+            condition += sys->sprint("%c%c", base, base);
         }
 
         next_tok := p.peek();
@@ -1067,6 +1589,29 @@ parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
                 increment += "->";
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
                 increment += sys->sprint("%c", tok.toktype);
+            } else if (tok.toktype >= 256 && tok.toktype < 512) {
+                # Two-character compound operator (+=, -=, ==, !=, <=, >=, etc.)
+                c1 := tok.toktype - 256;
+                c2 := tok.toktype - 256;  # For two-char ops, encoding is: base + 256
+                # Actually need to check the specific encoding
+                # +=: 61 + 256 = 317, -: 45, so we get +=
+                # The lexer encodes as: first_char + 256
+                increment += sys->sprint("%c", c1);
+                # For most compound ops, we need the second character too
+                # Check based on the first character
+                if (c1 == '+') increment += "=";
+                else if (c1 == '-') increment += "=";
+                else if (c1 == '=') increment += "=";
+                else if (c1 == '!') increment += "=";
+                else if (c1 == '<') increment += "=";
+                else if (c1 == '>') increment += "=";
+                else if (c1 == '*') increment += "=";
+                else if (c1 == '/') increment += "=";
+                else if (c1 == '%') increment += "=";
+            } else if (tok.toktype >= 512) {
+                # ++ or -- operator (encoded as base_char + 512)
+                base := tok.toktype - 512;
+                increment += sys->sprint("%c%c", base, base);
             }
 
             next_tok := p.peek();
@@ -1089,10 +1634,7 @@ parse_for_stmt(p: ref Parser): (ref Ast->Statement, string)
     if (err6 != nil)
         return (nil, err6);
 
-    # Skip optional semicolon
-    if (p.peek().toktype == ';')
-        p.next();
-
+    # No semolon needed after for statement with block
     return (ast->statement_create_for(lineno, init, condition, increment, body), nil);
 }
 
@@ -1138,6 +1680,23 @@ parse_while_stmt(p: ref Parser): (ref Ast->Statement, string)
                 condition += "->";
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
                 condition += sys->sprint("%c", tok.toktype);
+            } else if (tok.toktype >= 256 && tok.toktype < 512) {
+                # Two-character compound operator
+                c := tok.toktype - 256;
+                condition += sys->sprint("%c", c);
+                if (c == '+') condition += "=";
+                else if (c == '-') condition += "=";
+                else if (c == '=') condition += "=";
+                else if (c == '!') condition += "=";
+                else if (c == '<') condition += "=";
+                else if (c == '>') condition += "=";
+                else if (c == '*') condition += "=";
+                else if (c == '/') condition += "=";
+                else if (c == '%') condition += "=";
+            } else if (tok.toktype >= 512) {
+                # ++ or -- operator
+                base := tok.toktype - 512;
+                condition += sys->sprint("%c%c", base, base);
             }
 
             next_tok := p.peek();
@@ -1160,10 +1719,7 @@ parse_while_stmt(p: ref Parser): (ref Ast->Statement, string)
     if (err3 != nil)
         return (nil, err3);
 
-    # Skip optional semicolon
-    if (p.peek().toktype == ';')
-        p.next();
-
+    # No semicolon needed after while statement with block
     return (ast->statement_create_while(lineno, condition, body), nil);
 }
 
@@ -1177,10 +1733,10 @@ parse_return_stmt(p: ref Parser): (ref Ast->Statement, string)
     if (err1 != nil)
         return (nil, err1);
 
-    # Parse return value (if any) until ';' or newline
+    # Parse return value (if any) until ';' (newline no longer accepted)
     expression := "";
     while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
-           p.peek().toktype != ';' && p.peek().toktype != '\n' &&
+           p.peek().toktype != ';' &&
            p.peek().toktype != '}') {
         tok := p.next();
 
@@ -1204,16 +1760,19 @@ parse_return_stmt(p: ref Parser): (ref Ast->Statement, string)
 
         next_tok := p.peek();
         if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
-            next_tok.toktype != ';' && next_tok.toktype != '\n' &&
+            next_tok.toktype != ';' &&
             next_tok.toktype != '}' &&
             should_add_space(tok.toktype, next_tok.toktype)) {
             expression += " ";
         }
     }
 
-    # Consume optional semicolon
-    if (p.peek().toktype == ';')
-        p.next();
+    # Require ';' after return statement
+    tok := p.peek();
+    if (tok.toktype != ';') {
+        return (nil, fmt_error(p, "return statement must end with semicolon"));
+    }
+    p.next();  # consume ';'
 
     return (ast->statement_create_return(lineno, expression), nil);
 }
@@ -1223,10 +1782,10 @@ parse_expr_stmt(p: ref Parser): (ref Ast->Statement, string)
 {
     lineno := lexer->get_lineno(p.l);
 
-    # Parse expression until ';' or newline or '}'
+    # Parse expression until ';' or '}' (newline no longer accepted)
     expression := "";
     while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
-           p.peek().toktype != ';' && p.peek().toktype != '\n' &&
+           p.peek().toktype != ';' &&
            p.peek().toktype != '}') {
         tok := p.next();
 
@@ -1255,16 +1814,92 @@ parse_expr_stmt(p: ref Parser): (ref Ast->Statement, string)
 
         next_tok := p.peek();
         if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
-            next_tok.toktype != ';' && next_tok.toktype != '\n' &&
+            next_tok.toktype != ';' &&
             next_tok.toktype != '}' &&
             should_add_space(tok.toktype, next_tok.toktype)) {
             expression += " ";
         }
     }
 
-    # Consume optional semicolon
-    if (p.peek().toktype == ';')
-        p.next();
+    # Require ';' after expression statement
+    tok := p.peek();
+    if (tok.toktype != ';') {
+        return (nil, fmt_error(p, "expression statement must end with semicolon"));
+    }
+    p.next();  # consume ';'
+
+    return (ast->statement_create_expr(lineno, expression), nil);
+}
+
+# Parse an expression statement when the first token is already consumed
+parse_expr_stmt_with_first(p: ref Parser, first_tok: ref Token): (ref Ast->Statement, string)
+{
+    lineno := first_tok.lineno;
+
+    # Start expression with the first token
+    expression := "";
+    if (first_tok.toktype == Lexer->TOKEN_STRING) {
+        expression += "\"" + limbo_escape(first_tok.string_val) + "\"";
+    } else if (first_tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+        expression += first_tok.string_val;
+    } else if (first_tok.toktype == Lexer->TOKEN_NUMBER) {
+        expression += sys->sprint("%bd", first_tok.number_val);
+    } else if (first_tok.toktype == Lexer->TOKEN_REAL) {
+        if (first_tok.real_val == real (big first_tok.real_val)) {
+            expression += sys->sprint("%bd.0", big first_tok.real_val);
+        } else {
+            expression += sys->sprint("%g", first_tok.real_val);
+        }
+    } else if (first_tok.toktype == Lexer->TOKEN_ARROW) {
+        expression += "->";
+    } else if (first_tok.toktype >= 32 && first_tok.toktype <= 126) {
+        expression += sys->sprint("%c", first_tok.toktype);
+    }
+
+    # Parse rest of expression until ';' or '}' (newline no longer accepted)
+    while (p.peek().toktype != Lexer->TOKEN_ENDINPUT &&
+           p.peek().toktype != ';' &&
+           p.peek().toktype != '}') {
+        tok := p.next();
+
+        if (tok.toktype == Lexer->TOKEN_STRING) {
+            expression += "\"" + limbo_escape(tok.string_val) + "\"";
+        } else if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
+            expression += tok.string_val;
+        } else if (tok.toktype == Lexer->TOKEN_NUMBER) {
+            expression += sys->sprint("%bd", tok.number_val);
+        } else if (tok.toktype == Lexer->TOKEN_REAL) {
+            if (tok.real_val == real (big tok.real_val)) {
+                expression += sys->sprint("%bd.0", big tok.real_val);
+            } else {
+                expression += sys->sprint("%g", tok.real_val);
+            }
+        } else if (tok.toktype == Lexer->TOKEN_ARROW) {
+            expression += "->";
+        } else if (tok.toktype >= 32 && tok.toktype <= 126) {
+            expression += sys->sprint("%c", tok.toktype);
+        } else {
+            # Handle keyword tokens
+            s := token_to_string(tok);
+            if (s != nil && len s > 0)
+                expression += s;
+        }
+
+        next_tok := p.peek();
+        if (next_tok.toktype != Lexer->TOKEN_ENDINPUT &&
+            next_tok.toktype != ';' &&
+            next_tok.toktype != '}' &&
+            should_add_space(tok.toktype, next_tok.toktype)) {
+            expression += " ";
+        }
+    }
+
+    # Require ';' after expression statement
+    tok := p.peek();
+    if (tok.toktype != ';') {
+        return (nil, fmt_error(p, "expression statement must end with semicolon"));
+    }
+    p.next();  # consume ';'
 
     return (ast->statement_create_expr(lineno, expression), nil);
 }
@@ -1292,6 +1927,7 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
     # For simplicity, we just look for the matching ")"
     paren_count := 1;
     params := "";
+    prev_toktype := 0;
     while (paren_count > 0 && p.peek().toktype != Lexer->TOKEN_ENDINPUT) {
         tok := p.next();
         if (tok.toktype == '(')
@@ -1303,6 +1939,7 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
             # Add to params string with proper spacing
             if (tok.toktype == Lexer->TOKEN_IDENTIFIER) {
                 # Check if previous char was not a space and next is not special
+                # No space needed after '(', or ':'
                 if (len params > 0 && params[len params - 1] != ' ' &&
                     params[len params - 1] != '(' && params[len params - 1] != ':')
                     params += " ";
@@ -1314,8 +1951,12 @@ parse_function_decl(p: ref Parser): (ref Ast->FunctionDecl, string)
             } else if (tok.toktype >= 32 && tok.toktype <= 126) {
                 params += sys->sprint("%c", tok.toktype);
             }
+            prev_toktype = tok.toktype;
         }
     }
+
+    # Convert Kryon *Type syntax to Limbo ref Type syntax in parameters
+    params = kryon_type_to_limbo(params);
 
     # Check for optional return type: : string
     return_type := "";
@@ -2078,7 +2719,7 @@ is_builtin_keyword(s: string): int
     if (s == "int") return 1;
     if (s == "real") return 1;
     if (s == "string") return 1;
-    if (s == "ref") return 1;
+    # 'ref' removed - Kryon uses *Type syntax instead
     if (s == "array") return 1;
     if (s == "list") return 1;
     if (s == "chan") return 1;
@@ -2100,7 +2741,43 @@ is_builtin_keyword(s: string): int
     if (s == "raise") return 1;
     if (s == "spawn") return 1;
     if (s == "exit") return 1;
+    # List built-in functions
+    if (s == "hd") return 1;
+    if (s == "tl") return 1;
+    if (s == "len") return 1;
     return 0;
+}
+
+# Convert Kryon *Type syntax to Limbo ref Type syntax
+# e.g., "*Image" -> "ref Image", "*int" -> "ref int"
+# Also handles "* Image" (with space) -> "ref Image"
+kryon_type_to_limbo(type_str: string): string
+{
+    result := "";
+    i := 0;
+
+    while (i < len type_str) {
+        # Check for *Type pattern
+        if (type_str[i] == '*' && i + 1 < len type_str) {
+            # Skip any whitespace after *
+            j := i + 1;
+            while (j < len type_str && (type_str[j] == ' ' || type_str[j] == '\t'))
+                j++;
+
+            # If we found a valid type identifier after *, convert to "ref "
+            if (j < len type_str && ((type_str[j] >= 'A' && type_str[j] <= 'Z') ||
+                                     (type_str[j] >= 'a' && type_str[j] <= 'z') ||
+                                     type_str[j] == '_')) {
+                result += "ref ";
+                i = j;  # Skip the * and any whitespace
+            }
+        }
+
+        result[len result] = type_str[i];
+        i++;
+    }
+
+    return result;
 }
 
 # Common standard library modules that should be excluded
@@ -2628,43 +3305,43 @@ transform_graphics_call(expr: string): (int, string, string)
 
     case method {
     "clear" =>
-        # ctx.clear(color) -> Graphics->clear(ctx, color)
+        # ctx.clear(color) -> graphics->clear(ctx, color)
         (args, color_decls) = transform_color_arg(args);
-        return (1, sys->sprint("Graphics->clear(%s, %s)", obj, args), color_decls);
+        return (1, sys->sprint("graphics->clear(%s, %s)", obj, args), color_decls);
 
     "fill" =>
-        # ctx.fill(color) -> Graphics->setfill(ctx, color)
+        # ctx.fill(color) -> graphics->setfill(ctx, color)
         (args, color_decls) = transform_color_arg(args);
-        return (1, sys->sprint("Graphics->setfill(%s, %s)", obj, args), color_decls);
+        return (1, sys->sprint("graphics->setfill(%s, %s)", obj, args), color_decls);
 
     "stroke" =>
-        # ctx.stroke(color) -> Graphics->setstroke(ctx, color)
+        # ctx.stroke(color) -> graphics->setstroke(ctx, color)
         (args, color_decls) = transform_color_arg(args);
-        return (1, sys->sprint("Graphics->setstroke(%s, %s)", obj, args), color_decls);
+        return (1, sys->sprint("graphics->setstroke(%s, %s)", obj, args), color_decls);
 
     "rect" =>
-        # ctx.rect(x, y, w, h) -> Graphics->rect(ctx, x, y, w, h)
-        return (1, sys->sprint("Graphics->rect(%s, %s)", obj, args), "");
+        # ctx.rect(x, y, w, h) -> graphics->rect(ctx, x, y, w, h)
+        return (1, sys->sprint("graphics->rect(%s, %s)", obj, args), "");
 
     "circle" =>
-        # ctx.circle(x, y, r) -> Graphics->circle(ctx, x, y, r)
-        return (1, sys->sprint("Graphics->circle(%s, %s)", obj, args), "");
+        # ctx.circle(x, y, r) -> graphics->circle(ctx, x, y, r)
+        return (1, sys->sprint("graphics->circle(%s, %s)", obj, args), "");
 
     "ellipse" =>
-        # ctx.ellipse(x, y, rx, ry) -> Graphics->ellipse(ctx, x, y, rx, ry)
-        return (1, sys->sprint("Graphics->ellipse(%s, %s)", obj, args), "");
+        # ctx.ellipse(x, y, rx, ry) -> graphics->ellipse(ctx, x, y, rx, ry)
+        return (1, sys->sprint("graphics->ellipse(%s, %s)", obj, args), "");
 
     "line" =>
-        # ctx.line(x1, y1, x2, y2) -> Graphics->line(ctx, x1, y1, x2, y2)
-        return (1, sys->sprint("Graphics->line(%s, %s)", obj, args), "");
+        # ctx.line(x1, y1, x2, y2) -> graphics->line(ctx, x1, y1, x2, y2)
+        return (1, sys->sprint("graphics->line(%s, %s)", obj, args), "");
 
     "text" =>
-        # ctx.text(str, x, y) -> Graphics->text(ctx, str, x, y)
-        return (1, sys->sprint("Graphics->text(%s, %s)", obj, args), "");
+        # ctx.text(str, x, y) -> graphics->text(ctx, str, x, y)
+        return (1, sys->sprint("graphics->text(%s, %s)", obj, args), "");
 
     "setlinewidth" =>
-        # ctx.setlinewidth(w) -> Graphics->setlinewidth(ctx, w)
-        return (1, sys->sprint("Graphics->setlinewidth(%s, %s)", obj, args), "");
+        # ctx.setlinewidth(w) -> graphics->setlinewidth(ctx, w)
+        return (1, sys->sprint("graphics->setlinewidth(%s, %s)", obj, args), "");
     }
 
     return (0, expr, "");
@@ -2703,7 +3380,7 @@ transform_color_arg(arg: string): (string, string)
         if (len inner > 0 && inner[0] == '"') {
             # Color("#ff0000") -> extract hex and call display.color
             hex_val := inner[1:len inner - 1];
-            return (sys->sprint("Graphics->hexcolor(display, \"%s\")", hex_val), "");
+            return (sys->sprint("graphics->hexcolor(display, \"%s\")", hex_val), "");
         }
     }
 
@@ -2711,7 +3388,7 @@ transform_color_arg(arg: string): (string, string)
     if (len trimmed > 11 && trimmed[0:6] == "Color" && trimmed[6:9] == ".rgb" && trimmed[9] == '(') {
         args := trimmed[10:len trimmed - 1];
         # Color.rgb(255,0,0) -> display.rgb(255,0,0)
-        return (sys->sprint("Graphics->rgb(display, %s)", args), "");
+        return (sys->sprint("graphics->rgb(display, %s)", args), "");
     }
 
     return (arg, "");
@@ -3395,7 +4072,33 @@ generate_var_decls(cg: ref Codegen, prog: ref Program): string
         var_type := vds.typ;
         if (var_type == nil || var_type == "")
             var_type = "string";  # default fallback
-        sys->fprint(cg.output, "%s: %s;\n", vds.name, var_type);
+
+        # Check if there's an initialization value
+        if (vds.init_value != nil) {
+            pick init_val := vds.init_value {
+            String =>
+                init_expr := sys->sprint("\"%s\"", init_val.string_val);
+                sys->fprint(cg.output, "%s: %s = %s;\n", vds.name, var_type, init_expr);
+            Number =>
+                sys->fprint(cg.output, "%s: %s = %bd;\n", vds.name, var_type, init_val.number_val);
+            Real =>
+                sys->fprint(cg.output, "%s: %s = %g;\n", vds.name, var_type, init_val.real_val);
+            Identifier =>
+                sys->fprint(cg.output, "%s: %s = %s;\n", vds.name, var_type, init_val.ident_val);
+            Color =>
+                sys->fprint(cg.output, "%s: %s = %s;\n", vds.name, var_type, init_val.color_val);
+            * =>
+                # Array, FnCall - use init_expr string
+                if (vds.init_expr != nil && len vds.init_expr > 0)
+                    sys->fprint(cg.output, "%s: %s = %s;\n", vds.name, var_type, vds.init_expr);
+                else
+                    sys->fprint(cg.output, "%s: %s;\n", vds.name, var_type);
+            }
+        } else if (vds.init_expr != nil && len vds.init_expr > 0) {
+            sys->fprint(cg.output, "%s: %s = %s;\n", vds.name, var_type, vds.init_expr);
+        } else {
+            sys->fprint(cg.output, "%s: %s;\n", vds.name, var_type);
+        }
         vds = vds.next;
     }
 
@@ -3799,6 +4502,7 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     # Required modules - added in reverse order (after reversal, these come last)
     modules = ref Module("sys", "sys", "Sys") :: modules;
     modules = ref Module("draw", "draw", "Draw") :: modules;
+    modules = ref Module("daytime", "daytime", "Daytime") :: modules;
 
     if (is_draw) {
         # Check if mouse events are needed
@@ -3821,6 +4525,9 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
         if (needs_graphics_module(prog)) {
             modules = ref Module("graphics", "graphics", "Graphics") :: modules;
         }
+
+        # math module (for math functions)
+        modules = ref Module("math", "math", "Math") :: modules;
 
         # tk must come before wmclient - add wmclient first (it goes to front)
         modules = ref Module("wmclient", "wmclient", "Wmclient") :: modules;
@@ -3903,10 +4610,11 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     # Add function signatures from function_decls
     fd := prog.function_decls;
     while (fd != nil) {
+        transformed_params := transform_params_graphics(fd.params);
         if (fd.return_type != nil && fd.return_type != "")
-            buf += sys->sprint("    %s: fn(%s): %s;\n", fd.name, fd.params, fd.return_type);
+            buf += sys->sprint("    %s: fn(%s): %s;\n", fd.name, transformed_params, fd.return_type);
         else
-            buf += sys->sprint("    %s: fn(%s);\n", fd.name, fd.params);
+            buf += sys->sprint("    %s: fn(%s);\n", fd.name, transformed_params);
         fd = fd.next;
     }
 
@@ -3931,6 +4639,42 @@ generate_prologue(cg: ref Codegen, prog: ref Program): string
     return nil;
 }
 
+# Get default value for a type (for type-only variable declarations)
+get_default_value_for_type(typ: string): string
+{
+    if (typ == nil || typ == "")
+        return "0";
+
+    # Handle basic types
+    if (typ == "int" || typ == "byte" || typ == "big")
+        return "0";
+    if (typ == "real")
+        return "0.0";
+    if (typ == "string")
+        return "\"\"";
+    if (typ == "bool")
+        return "0";
+
+    # Handle array types - return nil for arrays
+    if (len typ > 6 && typ[0:6] == "array of")
+        return "nil";
+
+    # Handle chan types - return nil for channels
+    if (len typ > 5 && typ[0:4] == "chan")
+        return "nil";
+
+    # For ref types (objects, modules), return nil
+    if (len typ > 4 && typ[0:3] == "ref")
+        return "nil";
+
+    # For list types, return nil
+    if (len typ > 5 && typ[0:9] == "list of")
+        return "nil";
+
+    # Default fallback
+    return "nil";
+}
+
 # Generate code for a single statement without processing next chain
 # Used when iterating through statement lists in Blocks
 generate_statement_no_next(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): string
@@ -3949,8 +4693,12 @@ generate_statement_no_next(cg: ref Codegen, stmt: ref Ast->Statement, indent: in
         if (s.var_decl != nil) {
             if (s.var_decl.init_expr != nil && len s.var_decl.init_expr > 0)
                 sys->fprint(cg.output, "%s%s := %s;\n", indent_str, s.var_decl.name, s.var_decl.init_expr);
-            else
-                sys->fprint(cg.output, "%s%s : %s;\n", indent_str, s.var_decl.name, s.var_decl.typ);
+            else {
+                # Type-only declaration - generate proper initialization
+                # In Limbo, we must use := with a value, not "name : type;"
+                default_val := get_default_value_for_type(s.var_decl.typ);
+                sys->fprint(cg.output, "%s%s := %s;\n", indent_str, s.var_decl.name, default_val);
+            }
         }
     Block =>
         sys->fprint(cg.output, "%s{\n", indent_str);
@@ -3961,14 +4709,46 @@ generate_statement_no_next(cg: ref Codegen, stmt: ref Ast->Statement, indent: in
         }
         sys->fprint(cg.output, "%s}\n", indent_str);
     If =>
-        sys->fprint(cg.output, "%sif (%s) {\n", indent_str, s.condition);
-        if (s.then_stmt != nil)
-            generate_statement_no_next(cg, s.then_stmt, indent + 1);
-        sys->fprint(cg.output, "%s}\n", indent_str);
+        sys->fprint(cg.output, "%sif (%s) ", indent_str, s.condition);
+        # Generate if body - unwrap if it's a Block to avoid double braces
+        if (s.then_stmt != nil) {
+            pick then_body := s.then_stmt {
+            Block =>
+                # For block statements, generate the opening brace, then contents directly
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := then_body.statements;
+                while (sub_stmt != nil) {
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            * =>
+                # For single statements, wrap in braces
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.then_stmt, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            }
+        } else {
+            sys->fprint(cg.output, "{}\n");
+        }
+
+        # Handle else clause similarly
         if (s.else_stmt != nil) {
-            sys->fprint(cg.output, "%selse {\n", indent_str);
-            generate_statement_no_next(cg, s.else_stmt, indent + 1);
-            sys->fprint(cg.output, "%s}\n", indent_str);
+            sys->fprint(cg.output, "%selse ", indent_str);
+            pick else_body := s.else_stmt {
+            Block =>
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := else_body.statements;
+                while (sub_stmt != nil) {
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            * =>
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.else_stmt, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            }
         }
     For =>
         sys->fprint(cg.output, "%sfor (", indent_str);
@@ -3977,23 +4757,62 @@ generate_statement_no_next(cg: ref Codegen, stmt: ref Ast->Statement, indent: in
             VarDecl =>
                 if (i.var_decl.init_expr != nil && len i.var_decl.init_expr > 0)
                     sys->fprint(cg.output, "%s := %s", i.var_decl.name, i.var_decl.init_expr);
-                else
-                    sys->fprint(cg.output, "%s : %s", i.var_decl.name, i.var_decl.typ);
+                else {
+                    # Type-only in for loop init - use default value
+                    default_val := get_default_value_for_type(i.var_decl.typ);
+                    sys->fprint(cg.output, "%s := %s", i.var_decl.name, default_val);
+                }
             Expr =>
                 sys->fprint(cg.output, "%s", i.expression);
             * =>
                 {}
             }
         }
-        sys->fprint(cg.output, "; %s; %s) {\n", s.condition, s.increment);
-        if (s.body != nil)
-            generate_statement_no_next(cg, s.body, indent + 1);
-        sys->fprint(cg.output, "%s}\n", indent_str);
+        sys->fprint(cg.output, "; %s; %s) ", s.condition, s.increment);
+        # Generate for body - unwrap if it's a Block to avoid double braces
+        if (s.body != nil) {
+            pick for_body := s.body {
+            Block =>
+                # For block statements, generate the opening brace, then contents directly
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := for_body.statements;
+                while (sub_stmt != nil) {
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            * =>
+                # For single statements, wrap in braces
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            }
+        } else {
+            sys->fprint(cg.output, "{}\n");
+        }
     While =>
-        sys->fprint(cg.output, "%swhile (%s) {\n", indent_str, s.condition);
-        if (s.body != nil)
-            generate_statement_no_next(cg, s.body, indent + 1);
-        sys->fprint(cg.output, "%s}\n", indent_str);
+        sys->fprint(cg.output, "%swhile (%s) ", indent_str, s.condition);
+        # Generate while body - unwrap if it's a Block to avoid double braces
+        if (s.body != nil) {
+            pick while_body := s.body {
+            Block =>
+                # For block statements, generate the opening brace, then contents directly
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := while_body.statements;
+                while (sub_stmt != nil) {
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            * =>
+                # For single statements, wrap in braces
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            }
+        } else {
+            sys->fprint(cg.output, "{}\n");
+        }
     Return =>
         if (s.expression != nil && len s.expression > 0)
             sys->fprint(cg.output, "%sreturn %s;\n", indent_str, s.expression);
@@ -4040,8 +4859,9 @@ generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): stri
                 # var with initialization: name := value
                 sys->fprint(cg.output, "%s%s := %s;\n", indent_str, s.var_decl.name, s.var_decl.init_expr);
             } else {
-                # var without initialization: name : type
-                sys->fprint(cg.output, "%s%s : %s;\n", indent_str, s.var_decl.name, s.var_decl.typ);
+                # Type-only declaration - generate proper initialization
+                default_val := get_default_value_for_type(s.var_decl.typ);
+                sys->fprint(cg.output, "%s%s := %s;\n", indent_str, s.var_decl.name, default_val);
             }
         }
 
@@ -4055,8 +4875,11 @@ generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): stri
                 if (sub.var_decl != nil) {
                     if (sub.var_decl.init_expr != nil && len sub.var_decl.init_expr > 0)
                         sys->fprint(cg.output, "%s%s := %s;\n", indent_str + "    ", sub.var_decl.name, sub.var_decl.init_expr);
-                    else
-                        sys->fprint(cg.output, "%s%s : %s;\n", indent_str + "    ", sub.var_decl.name, sub.var_decl.typ);
+                    else {
+                        # Type-only declaration - generate proper initialization
+                        default_val := get_default_value_for_type(sub.var_decl.typ);
+                        sys->fprint(cg.output, "%s%s := %s;\n", indent_str + "    ", sub.var_decl.name, default_val);
+                    }
                 }
             Expr =>
                 if (sub.expression != nil && len sub.expression > 0) {
@@ -4087,37 +4910,44 @@ generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): stri
 
     If =>
         # if (condition) then_stmt [else else_stmt]
-        sys->fprint(cg.output, "%sif (%s) {\n", indent_str, s.condition);
+        sys->fprint(cg.output, "%sif (%s) ", indent_str, s.condition);
+        # Generate if body - unwrap if it's a Block to avoid double braces
         if (s.then_stmt != nil) {
-            pick ts := s.then_stmt {
+            pick then_body := s.then_stmt {
             Block =>
-                # Already has braces, just indent the content
-                sub_stmt := ts.statements;
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := then_body.statements;
                 while (sub_stmt != nil) {
-                    generate_statement(cg, sub_stmt, indent + 1);
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
                     sub_stmt = sub_stmt.next;
                 }
+                sys->fprint(cg.output, "%s}\n", indent_str);
             * =>
-                generate_statement(cg, s.then_stmt, indent + 1);
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.then_stmt, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
             }
-        }
-        sys->fprint(cg.output, "%s}", indent_str);
-
-        if (s.else_stmt != nil) {
-            sys->fprint(cg.output, " else {\n");
-            pick es := s.else_stmt {
-            Block =>
-                sub_stmt := es.statements;
-                while (sub_stmt != nil) {
-                    generate_statement(cg, sub_stmt, indent + 1);
-                    sub_stmt = sub_stmt.next;
-                }
-            * =>
-                generate_statement(cg, s.else_stmt, indent + 1);
-            }
-            sys->fprint(cg.output, "%s}\n", indent_str);
         } else {
-            sys->fprint(cg.output, "\n");
+            sys->fprint(cg.output, "{}\n");
+        }
+
+        # Handle else clause similarly
+        if (s.else_stmt != nil) {
+            sys->fprint(cg.output, "%selse ", indent_str);
+            pick else_body := s.else_stmt {
+            Block =>
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := else_body.statements;
+                while (sub_stmt != nil) {
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
+                    sub_stmt = sub_stmt.next;
+                }
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            * =>
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.else_stmt, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
+            }
         }
 
     For =>
@@ -4130,8 +4960,11 @@ generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): stri
             VarDecl =>
                 if (i.var_decl.init_expr != nil && len i.var_decl.init_expr > 0)
                     sys->fprint(cg.output, "%s := %s", i.var_decl.name, i.var_decl.init_expr);
-                else
-                    sys->fprint(cg.output, "%s : %s", i.var_decl.name, i.var_decl.typ);
+                else {
+                    # Type-only in for loop init - use default value
+                    default_val := get_default_value_for_type(i.var_decl.typ);
+                    sys->fprint(cg.output, "%s := %s", i.var_decl.name, default_val);
+                }
             Expr =>
                 sys->fprint(cg.output, "%s", i.expression);
             * =>
@@ -4139,41 +4972,49 @@ generate_statement(cg: ref Codegen, stmt: ref Ast->Statement, indent: int): stri
             }
         }
 
-        sys->fprint(cg.output, "; %s; %s) {\n", s.condition, s.increment);
-
+        sys->fprint(cg.output, "; %s; %s) ", s.condition, s.increment);
+        # Generate for body - unwrap if it's a Block to avoid double braces
         if (s.body != nil) {
-            pick b := s.body {
+            pick for_body := s.body {
             Block =>
-                sub_stmt := b.statements;
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := for_body.statements;
                 while (sub_stmt != nil) {
-                    generate_statement(cg, sub_stmt, indent + 1);
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
                     sub_stmt = sub_stmt.next;
                 }
+                sys->fprint(cg.output, "%s}\n", indent_str);
             * =>
-                generate_statement(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
             }
+        } else {
+            sys->fprint(cg.output, "{}\n");
         }
-
-        sys->fprint(cg.output, "%s}\n", indent_str);
 
     While =>
         # while (condition) body
-        sys->fprint(cg.output, "%swhile (%s) {\n", indent_str, s.condition);
-
+        sys->fprint(cg.output, "%swhile (%s) ", indent_str, s.condition);
+        # Generate while body - unwrap if it's a Block to avoid double braces
         if (s.body != nil) {
-            pick b := s.body {
+            pick while_body := s.body {
             Block =>
-                sub_stmt := b.statements;
+                sys->fprint(cg.output, "{\n");
+                sub_stmt := while_body.statements;
                 while (sub_stmt != nil) {
-                    generate_statement(cg, sub_stmt, indent + 1);
+                    generate_statement_no_next(cg, sub_stmt, indent + 1);
                     sub_stmt = sub_stmt.next;
                 }
+                sys->fprint(cg.output, "%s}\n", indent_str);
             * =>
-                generate_statement(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "{\n");
+                generate_statement_no_next(cg, s.body, indent + 1);
+                sys->fprint(cg.output, "%s}\n", indent_str);
             }
+        } else {
+            sys->fprint(cg.output, "{}\n");
         }
-
-        sys->fprint(cg.output, "%s}\n", indent_str);
 
     Return =>
         # return expression;
@@ -4262,8 +5103,23 @@ generate_code_blocks(cg: ref Codegen, prog: ref Program): string
         sys->fprint(cg.output, "{\n");
 
         # Generate statements from the parsed AST
+        # If the body is a Block statement, generate its contents directly
+        # to avoid double braces (the function already opens with { and closes with })
         if (fd.body != nil) {
-            generate_statement(cg, fd.body, 1);
+            # Check if body is a Block - if so, generate its statements directly
+            pick b := fd.body {
+            Block =>
+                # Generate block contents directly without extra braces
+                sub_stmt := b.statements;
+                while (sub_stmt != nil) {
+                    # Use generate_statement_no_next since we're iterating manually
+                    generate_statement_no_next(cg, sub_stmt, 1);
+                    sub_stmt = sub_stmt.next;
+                }
+            * =>
+                # For non-block bodies (single statement), generate normally
+                generate_statement_no_next(cg, fd.body, 1);
+            }
         }
 
         sys->fprint(cg.output, "}\n");
@@ -4543,7 +5399,13 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
     sys->fprint(cg.output, "{\n");
     sys->fprint(cg.output, "    sys = load Sys Sys->PATH;\n");
     sys->fprint(cg.output, "    draw = load Draw Draw->PATH;\n");
+    # Only load Graphics module if it's actually needed (Canvas with onDraw, or Graphics context params)
+    if (needs_graphics_module(prog)) {
+        sys->fprint(cg.output, "    graphics = load Graphics Graphics->PATH;\n");
+    }
+    sys->fprint(cg.output, "    daytime = load Daytime Daytime->PATH;\n");
     sys->fprint(cg.output, "    math = load Math Math->PATH;\n");
+    sys->fprint(cg.output, "    wmclient = load Wmclient Wmclient->PATH;\n");
 
     # Load Pointer module if using mouse events
     if (onmousedown_fn != nil && onmousedown_fn != "" ||
@@ -4578,7 +5440,6 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
         imports = imports.next;
     }
 
-    sys->fprint(cg.output, "    wmclient = load Wmclient Wmclient->PATH;\n");
     sys->fprint(cg.output, "\n");
     sys->fprint(cg.output, "    sys->pctl(Sys->NEWPGRP, nil);\n");
     sys->fprint(cg.output, "    wmclient->init();\n");
@@ -4615,7 +5476,7 @@ generate_draw_init(cg: ref Codegen, prog: ref Program): string
         uses_graphics := function_uses_graphics(prog, ondraw_fn);
         if (uses_graphics) {
             sys->fprint(cg.output, "    now := daytime->now();\n");
-            sys->fprint(cg.output, "    graphics := Graphics->create(w.image, display);\n");
+            sys->fprint(cg.output, "    graphics := graphics->create(w.image, display);\n");
             sys->fprint(cg.output, "    %s(graphics, now);\n", ondraw_fn);
             sys->fprint(cg.output, "\n");
             sys->fprint(cg.output, "    ticks := chan of int;\n");

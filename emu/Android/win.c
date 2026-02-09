@@ -37,12 +37,20 @@ EGLDisplay g_display = EGL_NO_DISPLAY;
 EGLSurface g_surface = EGL_NO_SURFACE;
 EGLContext g_context = EGL_NO_CONTEXT;
 
+/* Main thread tracking for OpenGL context */
+static pthread_t main_thread_id;
+
 /* Screen buffer data */
 static int screenwidth = 0;
 static int screenheight = 0;
 static int screensize = 0;
 static uchar *screendata = NULL;
 static Memdata screendata_struct;
+
+/* Dirty flag for screen updates from non-main threads */
+static int screen_dirty = 0;
+static Rectangle dirty_rect;
+static pthread_mutex_t dirty_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* OpenGL ES resources */
 static GLuint texture = 0;
@@ -245,7 +253,7 @@ attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 		r->max.y = screenheight;
 		*chan = XRGB32;  /* 32-bit RGBA */
 		*d = 32;  /* Depth */
-		*width = screenwidth * 4;  /* Bytes per row */
+		*width = screenwidth;  /* u32 words per row (NOT bytes!) */
 		*softscreen = 1;  /* Software rendering */
 
 		/* Update Memdata structure to point to existing buffer */
@@ -293,7 +301,7 @@ attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 	r->max.y = screenheight;
 	*chan = XRGB32;  /* 32-bit RGBA */
 	*d = 32;  /* Depth */
-	*width = screenwidth * 4;  /* Bytes per row */
+	*width = screenwidth;  /* u32 words per row (NOT bytes!) */
 	*softscreen = 1;  /* Software rendering */
 
 	__android_log_print(ANDROID_LOG_INFO, "ATTACHSCREEN", "attachscreen: Returning new buffer %p", screendata);
@@ -318,6 +326,18 @@ flushmemscreen(Rectangle r)
 	}
 
 	if (screendata == NULL) {
+		return;
+	}
+
+	/*
+	 * Check if we're on the main thread
+	 * If not, set the dirty flag and return - the main loop will handle the flush
+	 */
+	if (!pthread_equal(pthread_self(), main_thread_id)) {
+		pthread_mutex_lock(&dirty_mutex);
+		screen_dirty = 1;
+		dirty_rect = r;
+		pthread_mutex_unlock(&dirty_mutex);
 		return;
 	}
 
@@ -779,6 +799,9 @@ win_init(struct android_app* app)
 
 	LOGI("win_init: Starting");
 
+	/* Store main thread ID for OpenGL context validation */
+	main_thread_id = pthread_self();
+
 	g_app_state = app;
 
 	/* Check if EGL is already initialized */
@@ -936,8 +959,19 @@ win_swap(void)
 	static int swap_count = 0;
 	static int anim_x = 0;
 	static int wm_has_content = 0;
+	int need_flush = 0;
+	Rectangle flush_rect;
 
 	if(g_display != EGL_NO_DISPLAY && g_surface != EGL_NO_SURFACE) {
+		/* Check if screen is dirty from another thread */
+		pthread_mutex_lock(&dirty_mutex);
+		if(screen_dirty) {
+			need_flush = 1;
+			flush_rect = dirty_rect;
+			screen_dirty = 0;
+		}
+		pthread_mutex_unlock(&dirty_mutex);
+
 		/* Just flush the current screen buffer and swap */
 		/* No test animation - let actual drawing show through */
 		if(screendata != NULL && screenwidth > 0 && screenheight > 0) {

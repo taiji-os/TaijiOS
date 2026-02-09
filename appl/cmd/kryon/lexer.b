@@ -258,6 +258,7 @@ check_keyword(id: string): int
     if (id == "for") return TOKEN_FOR;
     if (id == "while") return TOKEN_WHILE;
     if (id == "return") return TOKEN_RETURN;
+    if (id == "in") return TOKEN_IN;
 
     # Widget types
     if (id == "Window") return TOKEN_WINDOW;
@@ -391,7 +392,15 @@ lex(l: ref LexerObj): ref Token
         }
         return create_token('%', lineno);
     }
-    
+
+    if (c == ':') {
+        next_char(l);  # Consume the ':'
+        if (peek_char(l) == '=') {
+            next_char(l);  # Consume the '='
+            return create_token(':' + 256, lineno);  # := as compound token
+        }
+        return create_token(':', lineno);
+    }
 
     # String literal
     if (c == '"') {

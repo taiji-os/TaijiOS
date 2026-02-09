@@ -41,6 +41,7 @@ Lexer: module
     TOKEN_FOR: con 35;     # for keyword
     TOKEN_WHILE: con 36;   # while keyword
     TOKEN_RETURN: con 37;  # return keyword
+    TOKEN_IN: con 38;      # in keyword (for-each loops)
 
     # Token ADT - users need to access this
     Token: adt {

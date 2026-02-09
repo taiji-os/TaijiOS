@@ -339,11 +339,22 @@ doflush(Display *d)
 
 	/*
 	 * Android local display support:
-	 * If datachan is nil, we're in local mode and should succeed without
-	 * communicating with a draw device. This allows allocimage to work
-	 * on platforms like Android that don't have a traditional /dev/draw.
+	 * If datachan is nil, we're in local mode and need to execute draw commands
+	 * using the local draw command executor.
 	 */
 	if(d->datachan == nil) {
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+			"doflush: calling local_draw_exec with n=%d", n);
+#endif
+		/* Execute buffered draw commands locally */
+		extern int local_draw_exec(Display*, uchar*, int);
+		if(local_draw_exec(d, d->buf, n) < 0) {
+			if(_drawdebug)
+				_drawprint(2, "local_draw_exec failed: %r\n");
+			d->bufp = d->buf;
+			return -1;
+		}
 		d->bufp = d->buf;
 		return 1;
 	}

@@ -14,6 +14,29 @@
 
 static int debug = 0;
 
+/*
+ * android_module_redirect - Redirect module paths for Android-specific variants
+ * Returns a new path that should be used instead of the original path.
+ * Caller must free the returned path if it differs from the input.
+ *
+ * On Android, some modules have Android-specific implementations:
+ * - wmlib.dis -> wmlib-android.dis (uses /dev/wmctx-* instead of /mnt/wm)
+ */
+static char*
+android_module_redirect(const char *path)
+{
+	READMOD_LOG("android_module_redirect: called with path='%s'", path ? path : "(nil)");
+#ifdef __ANDROID__
+	/* Redirect wmlib.dis to wmlib-android.dis */
+	if(path != nil && strcmp(path, "/dis/lib/wmlib.dis") == 0) {
+		READMOD_LOG("android_module_redirect: Redirecting %s to /dis/lib/wmlib-android.dis", path);
+		return strdup("/dis/lib/wmlib-android.dis");
+	}
+#endif
+	READMOD_LOG("android_module_redirect: no redirect, returning nil");
+	return nil;
+}
+
 Module*
 readmod(char *path, Module *m, int sync)
 {
@@ -22,9 +45,23 @@ readmod(char *path, Module *m, int sync)
 	uchar *code;
 	Module *ans;
 	u32 length;
+	char *redirected_path;
+	int path_needs_free;
 
 	print("readmod: path='%s', m=%p, sync=%d\n", path, m, sync);
 	READMOD_LOG("readmod: path='%s', m=%p, sync=%d", path, m, sync);
+	READMOD_LOG("readmod: ABOUT TO CALL android_module_redirect");
+
+	/* Check for Android-specific module redirects */
+	redirected_path = android_module_redirect(path);
+	READMOD_LOG("readmod: AFTER android_module_redirect, redirected_path=%p", redirected_path);
+	if(redirected_path != nil) {
+		path_needs_free = 1;
+		READMOD_LOG("readmod: Using redirected path: %s -> %s", path, redirected_path);
+		path = redirected_path;
+	} else {
+		path_needs_free = 0;
+	}
 
 	if(path[0] == '$') {
 		print("readmod: built-in module path, m=%p\n", m);
@@ -104,9 +141,14 @@ done1:
 		kclose(fd);
 	}
 	free(d);
+
+	/* Free the redirected path if we allocated one */
+	if(path_needs_free)
+		free((void*)path);
+
 	if(ans != nil)
-		READMOD_LOG("readmod: SUCCESS loaded module %s", path);
+		READMOD_LOG("readmod: SUCCESS loaded module %s", redirected_path ? redirected_path : path);
 	else
-		READMOD_LOG("readmod: FAILED to load module %s", path);
+		READMOD_LOG("readmod: FAILED to load module %s", redirected_path ? redirected_path : path);
 	return ans;
 }

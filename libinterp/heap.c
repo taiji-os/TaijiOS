@@ -385,6 +385,22 @@ nheap(int n)
 	if(heapmonitor != nil)
 		heapmonitor(0, h, n);
 
+#ifdef __ANDROID__
+	/* Android fix: Touch the memory pages to ensure they're mapped
+	 * On Android ARM64, pages allocated via sbrk() might not be immediately
+	 * accessible due to lazy mapping. Touching each page ensures it's faulted in.
+	 */
+	{
+		volatile char *p = (volatile char*)h;
+		size_t size = sizeof(Heap) + n;
+		size_t page_size = 4096;  /* ARM64 page size */
+		for(size_t offset = 0; offset < size; offset += page_size) {
+			char dummy = p[offset];  /* Read to fault in the page */
+			(void)dummy;  /* Suppress unused warning */
+		}
+	}
+#endif
+
 	return h;
 }
 

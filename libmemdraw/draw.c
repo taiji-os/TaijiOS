@@ -3,6 +3,10 @@
 #include "memdraw.h"
 #include "pool.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 extern Pool* imagmem;
 int drawdebug;
 static int	tablesbuilt;
@@ -99,16 +103,30 @@ memimagedraw(Memimage *dst, Rectangle r, Memimage *src, Point p0, Memimage *mask
 	if(mask == nil)
 		mask = memopaque;
 
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: ENTRY dst=%p, r=(%d,%d)-(%d,%d), src=%p, p0=(%d,%d)",
+		dst, r.min.x, r.min.y, r.max.x, r.max.y, src, p0.x, p0.y);
+#endif
+
 DDBG	print("memimagedraw %p/%uX %R @ %p %p/%uX %P %p/%uX %P... ",
 		dst, dst->chan, r, dst->data->bdata, src, src->chan, p0, mask, mask->chan, p1);
 
 	if(drawclip(dst, &r, src, &p0, mask, &p1, &par.sr, &par.mr) == 0){
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: drawclip returned 0 (empty clipped rectangle)");
+#endif
 		if(drawdebug)
 			iprint("empty clipped rectangle\n");
 		return;
 	}
 
 	if(op < Clear || op > SoverD){
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: op out of range: %d", op);
+#endif
 		if(drawdebug)
 			iprint("op out of range: %d\n", op);
 		return;
@@ -129,8 +147,21 @@ DDBG	print("memimagedraw %p/%uX %R @ %p %p/%uX %P %p/%uX %P... ",
 			par.sval = pixelbits(src, src->r.min);
 			par.state |= Simplesrc;
 			par.srgba = imgtorgba(src, par.sval);
+#ifdef __ANDROID__
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+				"memimagedraw: sval=0x%x, srgba=0x%x, op=0x%x",
+				par.sval, par.srgba, op);
+#endif
 			par.sdval = rgbatoimg(dst, par.srgba);
+#ifdef __ANDROID__
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+				"memimagedraw: sdval=0x%x", par.sdval);
+#endif
 			if((par.srgba&0xFF) == 0 && (op&DoutS)){
+#ifdef __ANDROID__
+				__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+					"memimagedraw: early return - transparent source with DoutS");
+#endif
 				if (drawdebug) iprint("fill with transparent source\n");
 				return;	/* no-op successfully handled */
 			}
@@ -169,8 +200,16 @@ DDBG print("draw dr %R sr %R mr %R %ux\n", r, par.sr, par.mr, par.state);
 	 * There could be an if around this checking to see if dst is in video memory.
 	 */
 DDBG print("test hwdraw\n");
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: testing hwdraw");
+#endif
 	if(hwdraw(&par)){
 if(drawdebug) iprint("hw handled\n");
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: hwdraw handled the draw");
+#endif
 DDBG print("hwdraw handled\n");
 		return;
 	}
@@ -178,8 +217,16 @@ DDBG print("hwdraw handled\n");
 	 * Optimizations using memmove and memset.
 	 */
 DDBG print("test memoptdraw\n");
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: testing memoptdraw");
+#endif
 	if(memoptdraw(&par)){
 if(drawdebug) iprint("memopt handled\n");
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: memoptdraw handled the draw");
+#endif
 DDBG print("memopt handled\n");
 		return;
 	}
@@ -189,8 +236,16 @@ DDBG print("memopt handled\n");
 	 * Solid source color being painted through a boolean mask onto a high res image.
 	 */
 DDBG print("test chardraw\n");
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: testing chardraw");
+#endif
 	if(chardraw(&par)){
 if(drawdebug) iprint("chardraw handled\n");
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: chardraw handled the draw");
+#endif
 DDBG print("chardraw handled\n");
 		return;
 	}
@@ -199,9 +254,28 @@ DDBG print("chardraw handled\n");
 	 * General calculation-laden case that does alpha for each pixel.
 	 */
 DDBG print("do alphadraw\n");
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: calling alphadraw, dst=%p, r=(%d,%d)-(%d,%d)",
+		dst, r.min.x, r.min.y, r.max.x, r.max.y);
+#endif
 	alphadraw(&par);
 if(drawdebug) iprint("alphadraw handled\n");
 DDBG print("alphadraw handled\n");
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+		"memimagedraw: AFTER alphadraw, dst=%p, dst->data=%p", dst, dst->data);
+	if(dst->data && dst->data->bdata && dst->width > 0) {
+		int center_offset = (1140 * dst->width + 540) * 4;
+		uchar *pixel = (uchar*)dst->data->bdata + dst->zero + center_offset;
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: AFTER alphadraw, bdata=%p, zero=%d, center_offset=%d, pixel_addr=%p",
+			dst->data->bdata, dst->zero, center_offset, pixel);
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-memimagedraw",
+			"memimagedraw: AFTER alphadraw, center pixel B,G,R,A = [%d,%d,%d,%d]",
+			pixel[0], pixel[1], pixel[2], pixel[3]);
+	}
+#endif
 }
 
 /*
@@ -745,6 +819,14 @@ if(drawdebug) iprint("after if\n");
 		z->n = ndrawbuf;
 	}
 	drawbuf = z->p;
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+		"alphadraw: dst->data->bdata=%p, dst->zero=%d, dst->width=%d",
+		dst->data->bdata, dst->zero, dst->width);
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+		"alphadraw: z->dpar.bytermin=%p (expected %p), z->dpar.bwidth=%d",
+		z->dpar.bytermin, dst->data->bdata + dst->zero, z->dpar.bwidth);
+#endif
 if(drawdebug) iprint("after drawbuf\n");
 
 	/*
@@ -756,6 +838,11 @@ if(drawdebug) iprint("after drawbuf\n");
 	z->mpar.bufbase = drawbuf+z->mpar.bufoff;
 	z->dpar.bufbase = drawbuf+z->dpar.bufoff;
 	z->spar.convbuf = drawbuf+z->spar.convbufoff;
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+		"alphadraw: After bufbase assignment, z->dpar.bytermin=%p, z->dpar.bufbase=%p",
+		z->dpar.bytermin, z->dpar.bufbase);
+#endif
 
 	if(dir == 1){
 		starty = 0;
@@ -764,6 +851,10 @@ if(drawdebug) iprint("after drawbuf\n");
 		starty = dy-1;
 		endy = -1;
 	}
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+		"alphadraw: dy=%d, starty=%d, endy=%d, dir=%d", dy, starty, endy, dir);
+#endif
 if(drawdebug) iprint("before srcy\n");
 
 	/*
@@ -785,20 +876,108 @@ if(drawdebug) iprint("\ty=%d ", y);
 		clipy(src, &srcy);
 		clipy(dst, &dsty);
 		clipy(mask, &masky);
+#ifdef __ANDROID__
+		if(y == 1140) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=%d, dsty=%d, dy=%d, starty=%d, endy=%d",
+				y, dsty, dy, starty, endy);
+		}
+#endif
 
 		bsrc = rdsrc(&z->spar, z->spar.bufbase, srcy);
 DDBG print("[");
 		bmask = rdmask(&z->mpar, z->mpar.bufbase, masky);
 DDBG print("]\n");
 		bdst = rddst(&z->dpar, z->dpar.bufbase, dsty);
+#ifdef __ANDROID__
+		if(y == 1140) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, bsrc.delta=%d, bdst.delta=%d, src->chan=0x%x, dst->chan=0x%x",
+				bsrc.delta, bdst.delta, src->chan, dst->chan);
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, bdst.rgba=%p, bdst.red=%p, bdst.grn=%p, bdst.blu=%p",
+				bdst.rgba, bdst.red, bdst.grn, bdst.blu);
+		}
+#endif
 		if(op != Clear && (bsrc.delta != 4 || bdst.delta != 4 || src->chan != dst->chan))
 			bdst.rgba = nil;
+#ifdef __ANDROID__
+		if(y == 1140) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, AFTER rgba=nil check, bdst.rgba=%p", bdst.rgba);
+		}
+#endif
 DDBG		dumpbuf("src", bsrc, dx);
 DDBG		dumpbuf("mask", bmask, dx);
 DDBG		dumpbuf("dst", bdst, dx);
 		/* this is where the trapBUS error is springing from */
+#ifdef __ANDROID__
+		if(y == 1140) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, BEFORE calc, bsrc.red=%d, bsrc.grn=%d, bsrc.blu=%d, bsrc.alpha=%d",
+				bsrc.red ? bsrc.red[0] : -1, bsrc.grn ? bsrc.grn[0] : -1, bsrc.blu ? bsrc.blu[0] : -1,
+				bsrc.alpha ? bsrc.alpha[0] : -1);
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, BEFORE calc, bmask.alpha=%d",
+				bmask.alpha ? bmask.alpha[0] : -1);
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, BEFORE calc, bdst.red[2160]=%d", bdst.red[2160]);
+		}
+#endif
 		bdst = calc(bdst, bsrc, bmask, dx, isgrey, op);
+#ifdef __ANDROID__
+		if(y == 1140) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, AFTER calc, bdst.red[2160]=%d", bdst.red[2160]);
+		}
+#endif
+#ifdef __ANDROID__
+		if(y == starty) {
+			uchar *write_addr = z->dpar.bytermin+dsty*z->dpar.bwidth;
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=%d, dsty=%d, bytermin=%p, bwidth=%d, write_addr=%p",
+				y, dsty, z->dpar.bytermin, z->dpar.bwidth, write_addr);
+			if(bdst.rgba && dx > 540) {
+				__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+					"alphadraw: bdst.rgba[540]=0x%x (BEFORE write)", bdst.rgba[540]);
+			}
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: bdst.red=%p, bdst.grn=%p, bdst.blu=%p, bdst.delta=%d",
+				bdst.red, bdst.grn, bdst.blu, bdst.delta);
+		}
+		if(y == 1140) {
+			uchar *write_addr = z->dpar.bytermin+dsty*z->dpar.bwidth;
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=%d, dsty=%d, bytermin=%p, bwidth=%d, write_addr=%p",
+				y, dsty, z->dpar.bytermin, z->dpar.bwidth, write_addr);
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=%d, CALC: bytermin(%p) + dsty(%d) * bwidth(%d) = %p + %d = %p",
+				y, z->dpar.bytermin, dsty, z->dpar.bwidth, z->dpar.bytermin, dsty * z->dpar.bwidth, z->dpar.bytermin + (long)dsty * z->dpar.bwidth);
+			if(bdst.rgba && dx > 540) {
+				__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+					"alphadraw: y=1140, bdst.rgba[540]=0x%x (BEFORE write)", bdst.rgba[540]);
+			}
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, bdst.red=%p, bdst.grn=%p, bdst.blu=%p, bdst.delta=%d",
+				bdst.red, bdst.grn, bdst.blu, bdst.delta);
+		}
+#endif
 		wrdst(&z->dpar, z->dpar.bytermin+dsty*z->dpar.bwidth, bdst);
+#ifdef __ANDROID__
+		if(y == starty) {
+			uchar *write_addr = z->dpar.bytermin+dsty*z->dpar.bwidth;
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: AFTER write, write_addr[0]=0x%x, write_addr[4]=0x%x",
+				*(u32*)write_addr, *((u32*)write_addr + 1));
+		}
+		if(y == 1140) {
+			uchar *write_addr = z->dpar.bytermin+dsty*z->dpar.bwidth;
+			uchar *center_addr = write_addr + 540*4;
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-alphadraw",
+				"alphadraw: y=1140, write_addr=%p, center_addr=%p, value=0x%x",
+				write_addr, center_addr, *(u32*)center_addr);
+		}
+#endif
 	}
 
 	z->inuse = 0;

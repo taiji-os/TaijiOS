@@ -1,12 +1,12 @@
-use daytime
-use math
+use daytime;
+use math;
 
-var hrhand: ref Image
-var minhand: ref Image
-var dots: ref Image
-var back: ref Image
+var hrhand: *Image;
+var minhand: *Image;
+var dots: *Image;
+var back: *Image;
 
-fn initColors(display: ref Display) {
+fn initColors(display: *Display) {
     back = display.colormix(Draw->Palebluegreen, Draw->White);
     hrhand = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Darkblue);
     minhand = display.newimage(Rect((0,0),(1,1)), Draw->CMAP8, 1, Draw->Paleblue);
@@ -20,7 +20,7 @@ fn circlept(c: Point, r: int, degrees: int): Point {
     return c;
 }
 
-fn drawClock(screen: ref Image, t: int) {
+fn drawClock(screen: *Image, t: int) {
     if (screen == nil) { return; }
     var tms: daytime->Tm = daytime->local(t);
     var anghr: int = 90 - (tms.hour * 5 + tms.min / 10) * 6;
@@ -28,13 +28,13 @@ fn drawClock(screen: ref Image, t: int) {
     var r: Rect = screen.r;
     var c: Point = r.min.add(r.max).div(2);
     var rad: int;
-    
+
     if (r.dx() < r.dy()) {
         rad = r.dx();
     } else {
         rad = r.dy();
     }
-    
+
     rad /= 2;
     rad -= 8;
     screen.draw(screen.r, back, nil, ZP);

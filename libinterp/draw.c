@@ -10,6 +10,10 @@
 #include "memdraw.h"
 #include "memlayer.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #define DP if(1){}else print
 /*
  * When a Display is remote, it must be locked to synchronize the
@@ -348,6 +352,10 @@ Display_allocate(void *fp)
 	f = fp;
 	destroy(*f->ret);
 	*f->ret = H;
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+		"Display_allocate: ENTRY - Starting Display allocation");
+#endif
 	if(cacheqlock == nil){
 		cacheqlock = libqlalloc();
 		if(cacheqlock == nil)
@@ -356,9 +364,23 @@ Display_allocate(void *fp)
 	dev = string2c(f->dev);
 	if(dev[0] == 0)
 		dev = 0;
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+		"Display_allocate: Calling initdisplay(dev=%s)",
+		dev ? dev : "(nil)");
+#endif
 	display = initdisplay(dev, dev, nil);	/* TO DO: win, error */
-	if(display == 0)
+	if(display == 0) {
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_ERROR, "TaijiOS-Draw",
+			"Display_allocate: initdisplay FAILED");
+#endif
 		return;
+	}
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+		"Display_allocate: initdisplay succeeded, display=%p", display);
+#endif
 
 	dr = malloc(sizeof(DRef));
 	if(dr == nil)
@@ -403,6 +425,10 @@ Display_allocate(void *fp)
 		dd->drawdisplay.transparent = allocdrawimage(dd, r, display->transparent->chan, display->transparent, 1, 0);
 	}
 
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+		"Display_allocate: Display allocation complete, returning Display*=%p", &dd->drawdisplay);
+#endif
 	/* don't call unlockdisplay because the qlock was left up by initdisplay */
 	libqunlock(display->qlock);
 }
@@ -550,6 +576,13 @@ Image_flush(void *fp)
 	f = fp;
 	d = checkimage(f->win);
 	di = (DImage*)f->win;
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+		"Image_flush: func=%d, d->id=%d, d->screen=%p",
+		f->func, d ? d->id : -1, d ? d->screen : nil);
+#endif
+
 	switch(f->func){
 	case 0:	/* Draw->Flushoff */
 		di->flush = 0;
@@ -559,6 +592,11 @@ Image_flush(void *fp)
 		/* fall through */
 	case 2:	/* Draw->Flushnow */
 		locked = lockdisplay(d->display);
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+			"Image_flush: calling flushimage, d->id=%d, d->screen=%p",
+			d->id, d->screen);
+#endif
 		if(d->id==0 || d->screen!=0)
 			flushimage(d->display, 1);
 		if(locked)
@@ -597,6 +635,19 @@ imagedraw(void *fp, int op)
 		m = d->display->white;	/* ones */
 	else
 		m = checkimage(f->matte);
+
+#ifdef __ANDROID__
+	{
+		static int draw_count = 0;
+		if(draw_count < 5 || (draw_count % 50) == 0) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+				"imagedraw #%d: dst id=%d, src id=%d, op=%d",
+				draw_count, d->id, s->id, op);
+		}
+		draw_count++;
+	}
+#endif
+
 	if(d->display!=s->display || d->display!=m->display){
 		DP("imagedraw d->display!=s->display || d->display!=m->display\n");
 		return;
@@ -2306,12 +2357,28 @@ doflush(Display *d)
 
 #ifdef __ANDROID__
 	/*
-	 * Android local display: datachan is nil, skip channel I/O.
-	 * Drawing commands are executed directly through the draw device
-	 * (devdraw.c) which writes to screenimage, and flushmemscreen()
-	 * in win.c composites wmclient windows and renders to OpenGL ES.
+	 * Android local display: datachan is nil, use local draw command executor.
+	 * Drawing commands are executed by local_draw_exec() which uses memdraw
+	 * library functions to draw directly to the screen buffer.
 	 */
 	if(d->local || d->datachan == nil) {
+		static int flush_count = 0;
+		if(flush_count < 5 || (flush_count % 100) == 0) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-Draw",
+				"doflush: local=%d, datachan=%p, buf[0]=%c, n=%d",
+				d->local, d->datachan, d->buf[0], n);
+		}
+		flush_count++;
+
+		/* Execute draw commands locally using local_draw_exec */
+		extern int local_draw_exec(Display*, uchar*, int);
+		if(local_draw_exec(d, d->buf, n) < 0) {
+			__android_log_print(ANDROID_LOG_ERROR, "TaijiOS-Draw",
+				"doflush: local_draw_exec failed");
+			d->bufp = d->buf;
+			return -1;
+		}
+
 		d->bufp = d->buf;
 		return 1;
 	}
@@ -2458,4 +2525,449 @@ drawerror(Display *d, char *s)
 {
 	USED(d);
 	fprint(2, "draw: %s: %r\n", s);
+}
+
+/*
+ * Local draw command executor for Android
+ * Executes draw commands without requiring /dev/draw device
+ */
+#define HASHMASK 0x1F
+#define MAXID 256
+
+/* Local image storage */
+typedef struct LocalImg LocalImg;
+struct LocalImg {
+	int		id;
+	int		ref;
+	int		inuse;
+	Memimage*	image;
+	LocalImg*	next;
+};
+
+/* Local client state */
+typedef struct LocalClient LocalClient;
+struct LocalClient {
+	LocalImg *images[HASHMASK+1];
+	Display *display;
+	Memimage *screenimage;
+};
+
+static LocalClient *local_client = nil;
+
+static void
+drawrect_local(Rectangle *r, uchar *a)
+{
+	r->min.x = BG32INT(a+0*4);
+	r->min.y = BG32INT(a+1*4);
+	r->max.x = BG32INT(a+2*4);
+	r->max.y = BG32INT(a+3*4);
+}
+
+static void
+drawpt_local(Point *p, uchar *a)
+{
+	p->x = BG32INT(a+0*4);
+	p->y = BG32INT(a+1*4);
+}
+
+static LocalClient*
+localclient_init(Display *d)
+{
+	LocalClient *c;
+	c = mallocz(sizeof(LocalClient), 1);
+	if(c == nil)
+		return nil;
+	c->display = d;
+	/* Use the global screenimage which points to screendata */
+	extern Memimage *screenimage;
+	c->screenimage = screenimage;
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"localclient_init: display=%p, screenimage=%p, screenimage->data=%p",
+		d, screenimage, screenimage ? screenimage->data : nil);
+#endif
+
+	return c;
+}
+
+static Memimage*
+lookupimg(LocalClient *c, int id)
+{
+	LocalImg *l;
+	if(c == nil)
+		return nil;
+	l = c->images[id & HASHMASK];
+	while(l){
+		if(l->id == id && l->inuse)
+			return l->image;
+		l = l->next;
+	}
+	return nil;
+}
+
+static int
+installimg(LocalClient *c, int id, Memimage *img)
+{
+	LocalImg *l;
+	int h;
+
+	if(c == nil)
+		return 0;
+
+	l = malloc(sizeof(LocalImg));
+	if(l == 0)
+		return 0;
+
+	l->id = id;
+	l->ref = 1;
+	l->inuse = 1;
+	l->image = img;
+	h = id & HASHMASK;
+	l->next = c->images[h];
+	c->images[h] = l;
+
+	return 1;
+}
+
+static void
+uninstallimg(LocalClient *c, int id)
+{
+	LocalImg *l, *prev;
+	int h;
+
+	if(c == nil)
+		return;
+
+	h = id & HASHMASK;
+	prev = nil;
+	l = c->images[h];
+
+	while(l){
+		if(l->id == id){
+			if(prev)
+				prev->next = l->next;
+			else
+				c->images[h] = l->next;
+			if(l->image) {
+				if(l->image->layer)
+					memldelete(l->image->layer);
+				else
+					freememimage(l->image);
+			}
+			free(l);
+			return;
+		}
+		prev = l;
+		l = l->next;
+	}
+}
+
+static void
+flushimg(Memimage *dst, Rectangle r)
+{
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"flushimg: dst=%p, local_client=%p, local_client->screenimage=%p",
+		dst, local_client, local_client ? local_client->screenimage : 0);
+#endif
+	if(local_client && local_client->screenimage == dst) {
+		extern void flushmemscreen(Rectangle);
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"flushimg: calling flushmemscreen, r=(%d,%d)-(%d,%d)",
+			r.min.x, r.min.y, r.max.x, r.max.y);
+#endif
+		flushmemscreen(r);
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"flushimg: returned from flushmemscreen");
+#endif
+	}
+}
+
+static int
+exec_alloc_b(LocalClient *c, uchar *a)
+{
+	int id, screenid;
+	int repl;
+	u32 chan, value;
+	Rectangle r, clipr;
+	Memimage *img;
+	
+	id = BG32INT(a+1);
+	screenid = BG32INT(a+5);
+	chan = BG32INT(a+10);
+	repl = a[14];
+	drawrect_local(&r, a+15);
+	drawrect_local(&clipr, a+31);
+	value = BG32INT(a+47);
+
+	if(screenid != 0)
+		return 51;	/* not supported yet */
+
+	if(lookupimg(c, id) != nil)
+		return 51;
+
+	img = allocmemimage(r, chan);
+	if(img == nil)
+		return 51;
+
+	if(repl)
+		img->flags |= Frepl;
+	img->clipr = clipr;
+	if(!repl)
+		rectclip(&img->clipr, r);
+	memfillcolor(img, value);
+
+	if(installimg(c, id, img) == 0) {
+		freememimage(img);
+		return 51;
+	}
+
+	return 51;
+}
+
+static int
+exec_draw_d(LocalClient *c, uchar *a)
+{
+	Memimage *dst, *src, *mask;
+	Rectangle r;
+	Point p, q;
+	int dstid, srcid, maskid;
+
+	dstid = BG32INT(a+1);
+	srcid = BG32INT(a+5);
+	maskid = BG32INT(a+9);
+	drawrect_local(&r, a+13);
+	drawpt_local(&p, a+29);
+	drawpt_local(&q, a+37);
+
+	dst = lookupimg(c, dstid);
+	src = lookupimg(c, srcid);
+	if(dst == nil || src == nil)
+		return 45;
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_draw: dstid=%d dst=%p, srcid=%d src=%p, r=(%d,%d)-(%d,%d)",
+		dstid, dst, srcid, src, r.min.x, r.min.y, r.max.x, r.max.y);
+
+	/* Check src image details */
+	if(src) {
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"exec_draw: src->r=(%d,%d)-(%d,%d), src->clipr=(%d,%d)-(%d,%d), chan=0x%x, flags=0x%x",
+			src->r.min.x, src->r.min.y, src->r.max.x, src->r.max.y,
+			src->clipr.min.x, src->clipr.min.y, src->clipr.max.x, src->clipr.max.y,
+			src->chan, src->flags);
+	}
+	if(dst) {
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"exec_draw: dst->r=(%d,%d)-(%d,%d), dst->clipr=(%d,%d)-(%d,%d), chan=0x%x, flags=0x%x",
+			dst->r.min.x, dst->r.min.y, dst->r.max.x, dst->r.max.y,
+			dst->clipr.min.x, dst->clipr.min.y, dst->clipr.max.x, dst->clipr.max.y,
+			dst->chan, dst->flags);
+	}
+
+	/* Check src image pixel data */
+	if(src && src->data && src->data->bdata) {
+		uchar *src_pixel = (uchar*)src->data->bdata + src->zero;
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"exec_draw: src pixel[0] B,G,R,A = [%d,%d,%d,%d] => RGB(%d,%d,%d)",
+			src_pixel[0], src_pixel[1], src_pixel[2], src_pixel[3],
+			src_pixel[2], src_pixel[1], src_pixel[0]);
+	}
+#endif
+
+	if(maskid == 0)
+		mask = memopaque;
+	else
+		mask = lookupimg(c, maskid);
+
+	if(mask == nil)
+		mask = memopaque;
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_draw: BEFORE memdraw, dst=%p, src=%p, mask=%p", dst, src, mask);
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_draw: memdraw function ptr = %p", (void*)memdraw);
+#endif
+
+	memdraw(dst, r, src, p, mask, q, SoverD);
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_draw: AFTER memdraw, checking pixel data");
+	/* Check if pixel data actually changed - sample center of screen */
+	if(dst->data && dst->data->bdata) {
+		uchar *pixel_data = (uchar*)dst->data->bdata + dst->zero;
+		int center_y = dst->r.max.y / 2;  /* Should be around 1140 */
+		int center_x = dst->r.max.x / 2;   /* Should be around 540 */
+		int center_offset = (center_y * dst->width + center_x) * 4;
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"exec_draw: dst->r=(%d,%d)-(%d,%d), width=%d, zero=%d",
+			dst->r.min.x, dst->r.min.y, dst->r.max.x, dst->r.max.y, dst->width, dst->zero);
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"exec_draw: center pixel[%d] at (%d,%d) B,G,R,A = [%d,%d,%d,%d] => RGB(%d,%d,%d)",
+			center_offset, center_x, center_y,
+			pixel_data[center_offset + 0], pixel_data[center_offset + 1],
+			pixel_data[center_offset + 2], pixel_data[center_offset + 3],
+			pixel_data[center_offset + 2], pixel_data[center_offset + 1],
+			pixel_data[center_offset + 0]);
+	}
+#endif
+
+	flushimg(dst, r);
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_draw: AFTER flushimg");
+#endif
+
+	return 45;
+}
+
+static int
+exec_setclip_c(LocalClient *c, uchar *a)
+{
+	Memimage *dst;
+	int dstid, repl;
+	Rectangle clipr;
+
+	dstid = BG32INT(a+1);
+	repl = a[5];
+	drawrect_local(&clipr, a+6);
+
+	dst = lookupimg(c, dstid);
+	if(dst == nil)
+		return 22;  // Fixed: should be 22 bytes (1+4+1+4*4)
+
+	if(repl)
+		dst->flags |= Frepl;
+	dst->clipr = clipr;
+
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+		"exec_setclip_c: dstid=%d, dst=%p, repl=%d, clipr=(%d,%d)-(%d,%d)",
+		dstid, dst, repl, clipr.min.x, clipr.min.y, clipr.max.x, clipr.max.y);
+#endif
+
+	return 22;  // Fixed: should be 22 bytes (1+4+1+4*4)
+}
+
+static int
+exec_free_f(LocalClient *c, uchar *a)
+{
+	int id = BG32INT(a+1);
+	uninstallimg(c, id);
+	return 5;
+}
+
+static int
+exec_flush_v(LocalClient *c, uchar *a)
+{
+	USED(a);
+	if(c && c->screenimage) {
+		extern void flushmemscreen(Rectangle);
+		flushmemscreen(c->screenimage->r);
+	}
+	return 1;
+}
+
+int
+local_draw_exec(Display *d, uchar *buf, int n)
+{
+	uchar *p;
+	int remaining;
+	int cmd_size;
+
+	if(local_client == nil) {
+		local_client = localclient_init(d);
+		if(local_client == nil)
+			return -1;
+		/* Install screenimage as id 0 */
+		installimg(local_client, 0, local_client->screenimage);
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"local_draw_exec: installed screenimage as id 0");
+#endif
+	}
+
+	p = buf;
+	remaining = n;
+
+#ifdef __ANDROID__
+	if(n > 30) {
+		/* Print hex dump for larger buffers */
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"local_draw_exec: ENTRY, n=%d", n);
+		for(int i = 0; i < n && i < 80; i += 16) {
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+				"  %04x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+				i, p[i+0], p[i+1], p[i+2], p[i+3], p[i+4], p[i+5], p[i+6], p[i+7],
+				p[i+8], p[i+9], p[i+10], p[i+11], p[i+12], p[i+13], p[i+14], p[i+15]);
+		}
+	} else {
+		__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+			"local_draw_exec: ENTRY, n=%d, first 10 bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+			n, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]);
+	}
+#endif
+
+	while(remaining > 0) {
+		uchar opcode = *p;
+
+#ifdef __ANDROID__
+		if(opcode >= ' ' && opcode <= '~')
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+				"local_draw_exec: opcode='%c' (0x%02x), remaining=%d", opcode, opcode, remaining);
+		else
+			__android_log_print(ANDROID_LOG_INFO, "TaijiOS-LocalDraw",
+				"local_draw_exec: opcode=0x%02x, remaining=%d", opcode, remaining);
+#endif
+
+		switch(opcode) {
+		case 'b':
+			cmd_size = exec_alloc_b(local_client, p);
+			break;
+		case 'd':
+			cmd_size = exec_draw_d(local_client, p);
+			break;
+		case 'c':
+			cmd_size = exec_setclip_c(local_client, p);
+			break;
+		case 'f':
+			cmd_size = exec_free_f(local_client, p);
+			break;
+		case 'v':
+			cmd_size = exec_flush_v(local_client, p);
+			break;
+		case 'y':
+		case 'Y':
+		case 'e':
+		case 'A':
+			cmd_size = remaining;
+			break;
+		default:
+#ifdef __ANDROID__
+			__android_log_print(ANDROID_LOG_ERROR, "TaijiOS-LocalDraw",
+				"local_draw_exec: unknown opcode '%c'", opcode);
+#endif
+			return -1;
+		}
+
+		if(cmd_size <= 0 || cmd_size > remaining) {
+#ifdef __ANDROID__
+			__android_log_print(ANDROID_LOG_ERROR, "TaijiOS-LocalDraw",
+				"local_draw_exec: invalid cmd_size=%d, remaining=%d", cmd_size, remaining);
+#endif
+			return -1;
+		}
+
+		p += cmd_size;
+		remaining -= cmd_size;
+	}
+
+	return n;
 }

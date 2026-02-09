@@ -325,8 +325,10 @@ emuinit(void *imod)
 	LOGI("emuinit: Module initialization complete");
 
 	/* Load and run a simple Dis module from assets */
-	/* Skip clock - it uses wmclient and crashes on xprint */
+	/* Direct drawing tests - bypass wmclient */
 	static const char* test_modules[] = {
+		"dis/simpledraw.dis",  /* NEW: Simple draw test - Display.allocate + direct drawing */
+		"dis/directdraw.dis",  /* Direct drawing test - bypasses wmlib */
 		"dis/testsimple.dis",  /* Simple test without Draw */
 		"dis/testload.dis",    /* Minimal Draw module test */
 		"dis/minimal.dis",     /* GUI test with button */

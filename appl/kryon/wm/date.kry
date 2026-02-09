@@ -1,6 +1,6 @@
-use daytime
+use daytime;
 
-fn time(): string = daytime->time()[0:19] @ 1000
+fn time(): string = daytime->time()[0:19] @ 1000;
 
 Window {
     title = "Date"

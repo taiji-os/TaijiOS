@@ -42,58 +42,63 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 	if(s1 == H)
 		return 0;
 
-	/* DEFENSIVE VALIDATION for Android ARM64:
-	 * Check for obviously invalid pointers before dereferencing.
-	 * SEGV_ACCERR crashes indicate invalid memory access.
+	/* ANDROID DEBUG: Validate String access and log detailed info
+	 * The SEGV_ACCERR happens when accessing s1->Sascii[sip] or s1->Srune[sip]
+	 * This indicates memory permission issues with the String data array
 	 */
 #ifdef __ANDROID__
-	/* Debug: log pointer value */
-	static int xprint_count = 0;
-	if(xprint_count < 5) {
-		uintptr_t ptr_val = (uintptr_t)s1;
-		const uintptr_t thresh = (uintptr_t)0x100000000000ULL;
-		__android_log_print(ANDROID_LOG_INFO, "xprint",
-			"xprint: s1=%p, ptr_val=0x%llx, threshold=0x%llx, cmp=%d",
-			s1, (unsigned long long)ptr_val, (unsigned long long)thresh, (int)(ptr_val >= thresh));
-		xprint_count++;
-	}
+	{
+		static int xprint_call_count = 0;
 
-	/* Check for NULL or very low pointers (NULL page) */
-	if((uintptr)s1 < 0x1000) {
-		__android_log_print(ANDROID_LOG_ERROR, "xprint",
-			"xprint: Invalid s1=%p (too low), returning empty", s1);
-		return 0;
-	}
+		/* Log first few calls for debugging */
+		if(xprint_call_count < 10) {
+			__android_log_print(ANDROID_LOG_INFO, "xprint",
+				"[%d] xprint: s1=%p, buf=%p, n=%d",
+				xprint_call_count, s1, buf, n);
+			xprint_call_count++;
+		}
 
-	/* Check for suspiciously high pointers (likely corrupted)
-	 * DISABLED: The comparison was causing false positives on valid heap addresses
-	 * The real issue is the SEGV_ACCERR when dereferencing the String pointer
-	 * We'll rely on signal handling and the len validation instead */
+		/* Validate String pointer */
+		if((uintptr)s1 < 0x1000) {
+			__android_log_print(ANDROID_LOG_ERROR, "xprint",
+				"Invalid s1=%p (too low)", s1);
+			return 0;
+		}
 
-	/* Check alignment - String pointers should be word-aligned (8 bytes on ARM64) */
-	if(((uintptr)s1 & 7) != 0) {
-		__android_log_print(ANDROID_LOG_ERROR, "xprint",
-			"xprint: Invalid s1=%p (misaligned), returning empty", s1);
-		return 0;
-	}
+		if(((uintptr)s1 & 7) != 0) {
+			__android_log_print(ANDROID_LOG_ERROR, "xprint",
+				"Invalid s1=%p (misaligned)", s1);
+			return 0;
+		}
 
-	/* Try to safely validate the String structure */
-	/* Use volatile to prevent compiler from optimizing away the read */
-	volatile String *vs1 = s1;
-	volatile int *vlen = &vs1->len;
+		/* Try to read String structure fields safely */
+		volatile String *vs1 = s1;
+		volatile int *vlen = &vs1->len;
 
-	/* SAFETY: Touch the memory to make sure it's accessible before reading */
-	/* This helps catch SEGV early with better error info */
-#ifdef __ANDROID__
-	__builtin_prefetch(vlen, 0, 3); /* Prefetch with non-temporal hint */
-#endif
+		/* Use signal-safe approach to check if we can read len */
+		int test_len = 0;
+		int len_ok = 0;
 
-	/* Check if len looks reasonable before using it */
-	int test_len = *vlen;
-	if(test_len < -10000000 || test_len > 10000000) {
-		__android_log_print(ANDROID_LOG_ERROR, "xprint",
-			"xprint: Invalid s1->len=%d at s1=%p, returning empty", test_len, s1);
-		return 0;
+		/* Try to access len - if SEGV, signal handler will catch */
+		test_len = *vlen;
+		len_ok = 1;
+
+		if(!len_ok || test_len < -10000000 || test_len > 10000000) {
+			__android_log_print(ANDROID_LOG_ERROR, "xprint",
+				"Invalid s1->len=%d at s1=%p", test_len, s1);
+			return 0;
+		}
+
+		/* Check if we can access the data array pointer */
+		/* Calculate where Sascii should be (offset of data.ascii in String) */
+		volatile char *data_ptr = vs1->Sascii;
+
+		if(xprint_call_count <= 10) {
+			__android_log_print(ANDROID_LOG_INFO, "xprint",
+				"[%d] String layout: s1=%p, len=%d, Sascii=%p, offset=%td",
+				xprint_call_count-1, s1, test_len, data_ptr,
+				(char*)data_ptr - (char*)s1);
+		}
 	}
 #endif
 
@@ -105,6 +110,28 @@ xprint(Prog *xp, void *vfp, void *vva, String *s1, char *buf, int n)
 
 	b = buf;
 	eb = buf+n-1;
+
+	/* ANDROID FIX: Touch string data to ensure pages are mapped
+	 * On Android ARM64, lazy mapping can cause SEGV_ACCERR when accessing
+	 * heap-allocated strings. Touch the data array before using it.
+	 */
+#ifdef __ANDROID__
+	{
+		volatile char *data = isr ? (char*)s1->Srune : s1->Sascii;
+		int touch_len = nc;
+		/* Touch first byte of each page to fault it in */
+		for(int offset = 0; offset < touch_len; offset += 4096) {
+			volatile char dummy = data[offset];
+			(void)dummy;
+		}
+		/* Also touch the last byte */
+		if(touch_len > 0) {
+			volatile char dummy = data[touch_len - 1];
+			(void)dummy;
+		}
+	}
+#endif
+
 	while(nc--) {
 		c = isr ? s1->Srune[sip] : s1->Sascii[sip];
 		sip++;
