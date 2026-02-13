@@ -9,6 +9,9 @@
 load std
 mount {mntgen} /n
 
+# Load default theme
+echo gbc > /lib/theme/theme
+
 # checked these to get this working
 #	/n/m/home/j/local/plan9/plan9front/sys/src/9/boot/bootrc
 #	/n/m/home/j/local/plan9/plan9front/sys/src/9/boot/cpurc

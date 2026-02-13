@@ -1,5 +1,6 @@
 #include "lib9.h"
 #include "draw.h"
+#include <kernel.h>
 #include "tk.h"
 
 #define RGB(R,G,B) ((R<<24)|(G<<16)|(B<<8)|(0xff))
@@ -83,11 +84,66 @@ void
 tksetenvcolours(TkEnv *env)
 {
 	Coltab *c;
+	int i, fd, n;
+	char path[64];
+	char buf[32];
+	ulong color;
 
+	/*
+	 * First, try to read colors from /lib/theme/{0..16}
+	 * Mark each color as set or unset individually
+	 */
+	for(i = 0; i < TkNcolor; i++) {
+		snprint(path, sizeof(path), "/lib/theme/%d", i);
+		fd = kopen(path, OREAD);
+
+		if(fd >= 0) {
+			n = kread(fd, buf, sizeof(buf)-1);
+			kclose(fd);
+
+			if(n > 0) {
+				buf[n] = '\0';
+				/* Skip leading # if present */
+				if(buf[0] == '#') {
+					color = strtoul(buf+1, nil, 16);
+					env->colors[i] = color;
+					env->set |= (1<<i);
+					continue;  /* Got this color, move to next */
+				}
+			}
+		}
+
+		/* Failed to read this color - mark as unset, will use default later */
+		env->set &= ~(1<<i);
+	}
+
+	/*
+	 * Fill in any missing colors from default coltab[]
+	 * This allows partial theme overrides while keeping defaults for unset colors
+	 */
 	c = &coltab[0];
 	while(c->c != -1) {
-		env->colors[c->c] = tkrgbashade(c->rgba, c->shade);
-		env->set |= (1<<c->c);
+		if(!(env->set & (1<<c->c))) {
+			env->colors[c->c] = tkrgbashade(c->rgba, c->shade);
+			env->set |= (1<<c->c);
+		}
 		c++;
+	}
+
+	/* Track theme version for live updates */
+	fd = kopen("/lib/theme/ctl", OREAD);
+	if(fd >= 0) {
+		n = kread(fd, buf, sizeof(buf)-1);
+		kclose(fd);
+		if(n > 0) {
+			buf[n] = '\0';
+			/* Parse version from "version N" */
+			char *p = strstr(buf, "version ");
+			if(p != nil) {
+				env->themeversion = atoll(p + 8);
+			}
+		}
+	} else {
+		env->themeversion = 0;
 	}
 }

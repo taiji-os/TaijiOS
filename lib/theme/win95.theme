@@ -1,0 +1,31 @@
+# Windows 95 Style Theme for TaijiOS
+# Classic gray interface inspired by Windows 95
+
+# Button face gray
+background = #C0C0C0FF
+background_light = #E0E0E0FF
+background_dark = #A0A0A0FF
+
+# Primary text (black)
+foreground = #000000FF
+
+# Selection colors (title bar blue)
+select = #000080FF
+select_background = #000080FF
+select_foreground = #FFFFFFFF
+
+# Active/pressed widgets
+active_background = #D0D0D0FF
+active_background_light = #FFFFFFFF
+active_background_dark = #B0B0B0FF
+active_foreground = #000000FF
+
+# Disabled text (gray)
+disabled_foreground = #808080FF
+
+# Highlight text
+highlight_foreground = #000000FF
+
+# Fill and transparent
+fill = #C0C0C0FF
+transparent = #00000000

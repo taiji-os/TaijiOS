@@ -18,6 +18,7 @@ dev
 	draw	win-x11a
 	pointer
 	snarf
+	theme
 
 	ip	ipif6-posix ipaux
 	eia
@@ -96,6 +97,10 @@ root
 	/chan	/
 	/nvfs	/
 	/env	/
+	/lib/theme/classic.theme	/lib/theme/classic.theme
+	/lib/theme/dark.theme	/lib/theme/dark.theme
+	/lib/theme/gbc.theme	/lib/theme/gbc.theme
+	/lib/theme/win95.theme	/lib/theme/win95.theme
 #	/dis
 #	/n
 #	/icons

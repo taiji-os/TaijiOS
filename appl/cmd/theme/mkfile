@@ -1,0 +1,13 @@
+<$ROOT/mkconfig
+
+TARG=\
+	theme.dis\
+
+SYSMODULES=\
+	sys.m\
+	draw.m\
+	bufio.m\
+
+DISBIN=$ROOT/dis
+
+<$ROOT/mkfiles/mkdis

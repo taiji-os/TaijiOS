@@ -45,6 +45,7 @@ init(nil: ref Draw->Context, nil: list of string)
 #	sys->bind("#v","/dev",sys->MAFTER);     # VGA
 	sys->bind("#I0", "/net", sys->MAFTER);	# IP
 	sys->bind("#P","/dev",sys->MAFTER);		# arch
+	sys->bind("#w","/lib/theme",sys->MBEFORE);	# theme
 #	sys->bind("#P/realmode","/dev",sys->MAFTER); # not in the arch(3). What is this for?
 #	sys->bind("#P/realmodemem","/dev",sys->MAFTER);# not in the arch(3). What is this for?
 #	sys->bind("#O", "/dev", sys->MAFTER);	# Modem

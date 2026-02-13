@@ -1,5 +1,6 @@
 #include "lib9.h"
 #include "draw.h"
+#include <kernel.h>
 #include "tk.h"
 
 struct TkCol
@@ -513,6 +514,49 @@ tkdefaultenv(TkTop *t)
 
 	tksetenvcolours(env);
 	return env;
+}
+
+/*
+ * tkrefreshtheme - Refresh theme colors when theme version changes
+ * Called by the WM to check if theme has changed and update colors.
+ * Returns 1 if theme was refreshed, 0 if unchanged.
+ */
+int
+tkrefreshtheme(TkEnv *env)
+{
+	int fd, n;
+	char buf[128];
+	uvlong newversion;
+
+	fd = kopen("/lib/theme/ctl", OREAD);
+	if(fd < 0)
+		return 0;
+
+	n = kread(fd, buf, sizeof(buf)-1);
+	kclose(fd);
+
+	if(n <= 0)
+		return 0;
+
+	buf[n] = '\0';
+	newversion = 0;
+
+	/* Parse version from "version N" */
+	char *p = strstr(buf, "version ");
+	if(p != nil) {
+		newversion = atoll(p + 8);
+	}
+
+	if(newversion != env->themeversion) {
+		/* Theme changed, reload colors */
+		tksetenvcolours(env);
+		/* Mark root widget as dirty so it redraws with new colors */
+		if(env->top != nil && env->top->root != nil)
+			tkdirty(env->top->root);
+		return 1;
+	}
+
+	return 0;
 }
 
 void
@@ -1706,6 +1750,10 @@ tkexec(TkTop *t, char *arg, char **val)
 {
 	int cmdsz, n;
 	char *p, *cmd, *e, *c;
+
+	/* Check for theme changes before executing any command */
+	if(t->env != nil)
+		tkrefreshtheme(t->env);
 
 	if(t->execdepth >= 0 && ++t->execdepth > 128)
 		return TkDepth;

@@ -1,0 +1,25 @@
+# Dark Theme for TaijiOS
+# Easy on the eyes with cyan accents
+
+background = #222222FF
+background_light = #2A2A2AFF
+background_dark = #1A1A1AFF
+
+foreground = #EEEEEEFF
+
+select = #2AA198FF
+select_background = #073642FF
+select_background_light = #094650FF
+select_background_dark = #052734FF
+select_foreground = #FDF6E3FF
+
+active_background = #2C2C2CFF
+active_background_light = #343434FF
+active_background_dark = #242424FF
+active_foreground = #FFFFFFFF
+
+disabled_foreground = #586E75FF
+highlight_foreground = #93A1A1FF
+
+fill = #2C2C2CFF
+transparent = #00000000

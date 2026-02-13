@@ -411,6 +411,7 @@ struct TkEnv
 	ulong		colors[TkNcolor];	/* OPTcolr */
 	Font*		font;			/* Font description */
 	int		wzero;			/* Width of "0" in pixel */
+	uvlong		themeversion;		/* Track theme changes for live update */
 };
 
 struct TkGeom
@@ -683,6 +684,7 @@ extern	void		tksetpanelimage(Tk *tk, Image*, Image*);
 
 /* General - colrs.c */
 extern	void		tksetenvcolours(TkEnv*);
+extern	int		tkrefreshtheme(TkEnv*);
 
 /* General - ebind.c */
 extern	void		tkcmdbind(Tk*, int, char*, void*);

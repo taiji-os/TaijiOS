@@ -11,6 +11,7 @@ dev
 	dup
 	ssl
 	cap
+	theme
 
 	draw	screen vga vgax cga
 	pointer

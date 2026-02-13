@@ -1,0 +1,31 @@
+# Game Boy Color Theme for TaijiOS
+# Green LCD palette inspired by the original GBC
+
+# Lightest green (background)
+background = #9bbc0fFF
+background_light = #9bbc0fFF
+background_dark = #0f380fFF
+
+# Primary text (darkest green)
+foreground = #0f380fFF
+
+# Selection colors (dark green with light text)
+select = #8bac0fFF
+select_background = #306230FF
+select_foreground = #9bbc0fFF
+
+# Active/pressed widgets
+active_background = #8bac0fFF
+active_background_light = #9bbc0fFF
+active_background_dark = #306230FF
+active_foreground = #0f380fFF
+
+# Disabled text (dark green)
+disabled_foreground = #306230FF
+
+# Highlight text
+highlight_foreground = #0f380fFF
+
+# Fill and transparent
+fill = #8bac0fFF
+transparent = #00000000
