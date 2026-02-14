@@ -117,14 +117,6 @@ apply_toolbar_colors()
 	cmd(tbtop, "update");
 }
 
-timerproc(tick: chan of int)
-{
-	for(;;) {
-		sys->sleep(500);  # Poll every 500ms
-		tick <-= 1;
-	}
-}
-
 init(ctxt: ref Draw->Context, argv: list of string)
 {
 	sys  = load Sys Sys->PATH;
@@ -230,11 +222,6 @@ sys->print("error: %s\n", err);
 	donesetup := 0;
 	spawn setup(shctxt, setupfinished);
 
-	# Timer for polling theme changes
-	timer := chan of int;
-	spawn timerproc(timer);
-	lasttheme := get_theme_name();
-
 	snarf: array of byte;
 #	write("/prog/"+string sys->pctl(0, nil)+"/ctl", "restricted"); # for testing
 	for(;;) alt{
@@ -283,14 +270,6 @@ sys->print("error: %s\n", err);
 		rc <-= (snarf[int off:int e], "");	# XXX alt # TODO potential bug truncating big to int
 	donesetup = <-setupfinished =>
 		;
-	<-timer =>
-		# Poll for theme changes
-		cur := get_theme_name();
-		if(cur != nil && cur != lasttheme) {
-			lasttheme = cur;
-			load_toolbar_colors();
-			apply_toolbar_colors();
-		}
 	}
 }
 

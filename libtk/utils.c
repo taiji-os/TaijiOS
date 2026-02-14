@@ -329,6 +329,9 @@ tkhasalpha(TkEnv *e, int col)
 Image*
 tkgc(TkEnv *e, int col)
 {
+	if(!e->colors_valid) {
+		tkloadcolors(e);
+	}
 	return tkcolor(e->top->ctxt, e->colors[col]);
 }
 
@@ -517,6 +520,7 @@ tkdefaultenv(TkTop *t)
 		unlockdisplay(d);
 
 	tksetenvcolours(env);
+
 	return env;
 }
 
@@ -552,8 +556,9 @@ tkrefreshtheme(TkEnv *env)
 	}
 
 	if(newversion != env->themeversion) {
-		/* Theme changed, reload colors */
-		tksetenvcolours(env);
+		/* Theme changed - invalidate color cache */
+		env->themeversion = newversion;
+		env->colors_valid = 0;  /* Invalidate cache - colors loaded on next access */
 		/* Clear cached color images so new colors take effect */
 		if(env->top != nil && env->top->ctxt != nil)
 			tkfreecolcache(env->top->ctxt);
@@ -576,6 +581,11 @@ tkregtop(TkTop *t)
 	t->link = alltktops;
 	alltktops = t;
 	unlock(&alltktopslock);
+
+	/* NOTE: Don't register here - display might not be ready yet.
+	 * Theme registration should happen after X11 display is fully initialized.
+	 * Applications can manually call tkregistertheme() if needed.
+	 */
 }
 
 /*
@@ -585,6 +595,11 @@ void
 tkunregtop(TkTop *t)
 {
 	TkTop **tp;
+
+	/* Unregister theme callback */
+	if(t->env != nil) {
+		tkunregistertheme(t->env);
+	}
 
 	lock(&alltktopslock);
 	for(tp = &alltktops; *tp != nil; tp = &(*tp)->link) {
@@ -615,6 +630,68 @@ tkrefreshallthemes(void)
 	unlock(&alltktopslock);
 }
 
+/*
+ * theme_invalidate - Callback for theme change notifications
+ * Invalidates the color cache and triggers redraw of all widgets
+ */
+static void
+theme_invalidate(void *arg)
+{
+	TkEnv *env = (TkEnv*)arg;
+
+	/* Invalidate color cache */
+	env->colors_valid = 0;
+
+	/* Clear cached color images so new colors take effect */
+	if(env->top != nil && env->top->ctxt != nil)
+		tkfreecolcache(env->top->ctxt);
+
+	/* Mark all widgets as dirty so they redraw with new colors */
+	if(env->top != nil && env->top->root != nil)
+		tkdirtyall(env->top->root);
+}
+
+/*
+ * tkregistertheme - Register a TkEnv for theme change notifications
+ */
+void
+tkregistertheme(TkEnv *env)
+{
+	int fd;
+	void *buf[2];  /* [0] = callback, [1] = arg */
+
+	if(env == nil)
+		return;
+
+	fd = kopen("#w/register", OWRITE);
+	if(fd >= 0) {
+		/* Write both callback function and env pointer to register */
+		buf[0] = (void*)theme_invalidate;
+		buf[1] = (void*)env;
+		write(fd, buf, sizeof(buf));
+		kclose(fd);
+	}
+}
+
+/*
+ * tkunregistertheme - Unregister a TkEnv from theme change notifications
+ */
+void
+tkunregistertheme(TkEnv *env)
+{
+	int fd;
+
+	if(env == nil)
+		return;
+
+	fd = kopen("#w/unregister", OWRITE);
+	if(fd >= 0) {
+		/* Write pointer to env to unregister */
+		write(fd, &env, sizeof(env));
+		kclose(fd);
+	}
+}
+
 void
 tkputenv(TkEnv *env)
 {
@@ -636,6 +713,9 @@ tkputenv(TkEnv *env)
 
 	if(locked)
 		unlockdisplay(d);
+
+	/* Unregister from theme change notifications */
+	tkunregistertheme(env);
 
 	free(env);
 }

@@ -15,9 +15,6 @@
 #include <string.h>
 #include <stdio.h>
 
-/* External function from libtk to refresh all Tk windows */
-extern void tkrefreshallthemes(void);
-
 #define NTHEMECOLORS  26
 
 /* QID path values for theme files */
@@ -28,6 +25,8 @@ enum {
 	Qlist,
 	Qreload,
 	Qevent,
+	Qregister,  /* Register for theme change callbacks */
+	Qunregister, /* Unregister from theme change callbacks */
 	Qcolor0,   /* TkCforegnd */
 	Qcolor1,   /* TkCbackgnd */
 	Qcolor2,   /* TkCbackgndlght */
@@ -63,12 +62,20 @@ typedef struct ThemeColor {
 	int vers;
 } ThemeColor;
 
+/* Callback for theme change notifications */
+typedef struct ThemeCallback {
+	void (*callback)(void *);  /* Function to call on theme change */
+	void *arg;                 /* TkEnv or TkTop argument */
+	struct ThemeCallback *next;
+} ThemeCallback;
+
 typedef struct ThemeState {
 	Lock l;
 	ThemeColor colors[NTHEMECOLORS];
 	char current_theme[64];
 	uvlong version;
 	Rendez eventq;	/* For blocking reads on Qevent */
+	ThemeCallback *callbacks;  /* Registration list for theme notifications */
 } ThemeState;
 
 static ThemeState themestate;
@@ -81,6 +88,8 @@ static Dirtab themedirtab[] = {
 	"list",       {Qlist}, 0, 0444,
 	"reload",     {Qreload}, 0, 0222,
 	"event",      {Qevent}, 0, 0444,
+	"register",   {Qregister}, 0, 0222,
+	"unregister", {Qunregister}, 0, 0222,
 	"0",          {Qcolor0}, 0, 0666,
 	"1",          {Qcolor1}, 0, 0666,
 	"2",          {Qcolor2}, 0, 0666,
@@ -266,7 +275,13 @@ load_theme_by_name(char *name)
 	themestate.current_theme[sizeof(themestate.current_theme)-1] = 0;
 	themestate.version++;
 	Wakeup(&themestate.eventq);  /* Wake any blocked readers on Qevent */
-	tkrefreshallthemes();        /* Refresh all TkTops with new theme */
+
+	/* Notify all registered callbacks */
+	ThemeCallback *cb;
+	for(cb = themestate.callbacks; cb != nil; cb = cb->next) {
+		if(cb->callback != nil)
+			cb->callback(cb->arg);
+	}
 
 	unlock(&themestate.l);
 
@@ -372,6 +387,8 @@ themewrite(Chan *c, void *buf, long n, vlong off)
 	ulong path = c->qid.path;
 	ulong color;
 	char *p;
+	ThemeCallback *cb, **pcb;
+	void *ptr;
 
 	USED(off);
 
@@ -392,6 +409,52 @@ themewrite(Chan *c, void *buf, long n, vlong off)
 			return -1;  /* Error loading theme */
 		return n;  /* Success - return bytes written */
 
+	case Qregister:
+		/* Register callback: write contains [callback function, env pointer] */
+		{
+			void **buf = (void**)str;
+			void *callback = buf[0];
+			void *arg = buf[1];
+
+			lock(&themestate.l);
+			/* Check if already registered */
+			for(cb = themestate.callbacks; cb != nil; cb = cb->next) {
+				if(cb->arg == arg) {
+					unlock(&themestate.l);
+					return n;  /* Already registered */
+				}
+			}
+			/* Add new callback */
+			cb = malloc(sizeof(ThemeCallback));
+			if(cb == nil) {
+				unlock(&themestate.l);
+				return -1;
+			}
+			cb->callback = (void (*)(void*))callback;
+			cb->arg = arg;
+			cb->next = themestate.callbacks;
+			themestate.callbacks = cb;
+			unlock(&themestate.l);
+			return n;
+		}
+
+	case Qunregister:
+		/* Unregister callback: write contains pointer to TkEnv */
+		ptr = *(void**)str;
+		lock(&themestate.l);
+		pcb = &themestate.callbacks;
+		while(*pcb != nil) {
+			if((*pcb)->arg == ptr) {
+				cb = *pcb;
+				*pcb = cb->next;
+				free(cb);
+				break;
+			}
+			pcb = &(*pcb)->next;
+		}
+		unlock(&themestate.l);
+		return n;
+
 	case Qreload:
 		/* Trigger theme reload */
 		return n;
@@ -411,7 +474,14 @@ themewrite(Chan *c, void *buf, long n, vlong off)
 				themestate.colors[idx].vers++;
 				themestate.version++;
 				Wakeup(&themestate.eventq);  /* Wake any blocked readers on Qevent */
-				tkrefreshallthemes();        /* Refresh all TkTops with new theme */
+
+				/* Notify all registered callbacks */
+				ThemeCallback *cb;
+				for(cb = themestate.callbacks; cb != nil; cb = cb->next) {
+					if(cb->callback != nil)
+						cb->callback(cb->arg);
+				}
+
 				unlock(&themestate.l);
 				return n;
 			}

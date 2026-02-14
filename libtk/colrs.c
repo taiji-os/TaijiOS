@@ -110,16 +110,48 @@ static Coltab coltab[] =
 void
 tksetenvcolours(TkEnv *env)
 {
+	int fd, n;
+	char buf[128];
+
+	/*
+	 * Don't read colors - just check version and mark invalid
+	 * Colors will be loaded lazily when first accessed
+	 */
+
+	/* Track theme version for live updates */
+	fd = kopen("#w/ctl", OREAD);
+	if(fd >= 0) {
+		n = kread(fd, buf, sizeof(buf)-1);
+		kclose(fd);
+		if(n > 0) {
+			buf[n] = '\0';
+			/* Parse version from "version N" */
+			char *p = strstr(buf, "version ");
+			if(p != nil) {
+				env->themeversion = atoll(p + 8);
+			}
+		}
+	} else {
+		env->themeversion = 0;
+	}
+
+	env->colors_valid = 0;  /* Mark cache as invalid - colors loaded lazily */
+}
+
+/*
+ * tkloadcolors - Lazy color loader
+ * Loads colors from theme device on first access
+ */
+void
+tkloadcolors(TkEnv *env)
+{
 	Coltab *c;
 	int i, fd, n;
-	char path[64];
+	char path[32];
 	char buf[32];
 	ulong color;
 
-	/*
-	 * First, try to read colors from #w/{0..16} (theme device)
-	 * Mark each color as set or unset individually
-	 */
+	/* Read colors from #w/{0..25} (theme device) */
 	for(i = 0; i < TkNcolor; i++) {
 		snprint(path, sizeof(path), "#w/%d", i);
 		fd = kopen(path, OREAD);
@@ -157,20 +189,5 @@ tksetenvcolours(TkEnv *env)
 		c++;
 	}
 
-	/* Track theme version for live updates */
-	fd = kopen("#w/ctl", OREAD);
-	if(fd >= 0) {
-		n = kread(fd, buf, sizeof(buf)-1);
-		kclose(fd);
-		if(n > 0) {
-			buf[n] = '\0';
-			/* Parse version from "version N" */
-			char *p = strstr(buf, "version ");
-			if(p != nil) {
-				env->themeversion = atoll(p + 8);
-			}
-		}
-	} else {
-		env->themeversion = 0;
-	}
+	env->colors_valid = 1;  /* Cache is now valid */
 }

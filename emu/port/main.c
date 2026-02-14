@@ -311,7 +311,6 @@ emuinit(void *imod)
 	kbind("#^", "/chan", MBEFORE);
 	kbind("#m", "/dev", MBEFORE);	/* pointer */
 	kbind("#c", "/dev", MBEFORE);
-	kbind("#w", "/lib/theme", MBEFORE);	/* theme - MBEFORE adds device while keeping host files */
 	kbind("#p", "/prog", MREPL);
 	kbind("#d", "/fd", MREPL);
 	kbind("#I", "/net", MAFTER);	/* will fail on Plan 9 */
@@ -321,6 +320,7 @@ emuinit(void *imod)
 	kbind("#U/net", "/net", MAFTER);
 	kbind("#U/net.alt", "/net.alt", MAFTER);
 	kbind("#U/lib", "/lib", MAFTER);
+	kbind("#w", "/lib/theme", MBEFORE);	/* theme - mount AFTER host lib so theme files are visible */
 
 	if(cputype != nil)
 		ksetenv("cputype", cputype, 1);

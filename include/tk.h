@@ -425,6 +425,7 @@ struct TkEnv
 	Font*		font;			/* Font description */
 	int		wzero;			/* Width of "0" in pixel */
 	uvlong		themeversion;		/* Track theme changes for live update */
+	int		colors_valid;		/* Cache validity flag for lazy loading */
 };
 
 struct TkGeom
@@ -697,10 +698,13 @@ extern	void		tksetpanelimage(Tk *tk, Image*, Image*);
 
 /* General - colrs.c */
 extern	void		tksetenvcolours(TkEnv*);
+extern	void		tkloadcolors(TkEnv*);
 extern	int		tkrefreshtheme(TkEnv*);
 extern	void		tkregtop(TkTop*);
 extern	void		tkunregtop(TkTop*);
 extern	void		tkrefreshallthemes(void);
+extern	void		tkregistertheme(TkEnv*);
+extern	void		tkunregistertheme(TkEnv*);
 
 /* General - ebind.c */
 extern	void		tkcmdbind(Tk*, int, char*, void*);

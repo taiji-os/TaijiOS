@@ -87,13 +87,6 @@ init(ctxt: ref Draw->Context, nil: list of string)
 	tkclient->onscreen(top, nil);
 	tkclient->startinput(top, "kbd"::"ptr"::nil);
 
-	# Timer for polling theme changes
-	timer := chan of int;
-	spawn timerproc(timer);
-
-	# Remember current theme
-	lasttheme = current_theme();
-
 	for(;;) alt {
 	s := <-top.ctxt.kbd =>
 		tk->keyboard(top, s);
@@ -105,17 +98,6 @@ init(ctxt: ref Draw->Context, nil: list of string)
 		if(c == "exit")
 			return;
 		tkclient->wmctl(top, c);
-
-	<-timer =>
-		# Poll for theme changes
-		cur := current_theme();
-		if(cur != nil && cur != lasttheme) {
-			lasttheme = cur;
-			cmd(top, sys->sprint(".title configure -text {Theme: %s}", cur));
-			refresh_theme_colors();
-			cmd(top, "update");
-			populate_themes();
-		}
 
 	cmd := <-cmdch =>
 		case cmd {
@@ -342,12 +324,4 @@ cmd(top: ref Tk->Toplevel, s: string): string
 	if(e != nil && e[0] == '!')
 		sys->print("theme: tk error '%s': %s\n", s, e);
 	return e;
-}
-
-timerproc(tick: chan of int)
-{
-	for(;;) {
-		sys->sleep(500);  # Poll every 500ms
-		tick <-= 1;
-	}
 }
