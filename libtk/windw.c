@@ -338,6 +338,23 @@ tkupdate(TkTop *t)
 		}
 		tk = tkw->next;
 	}
+
+	/* Also process all widgets in the root tree to catch any that
+	 * aren't in the window hierarchy (e.g., during theme refresh).
+	 * This ensures widgets marked dirty by tkdirtyall() get redrawn.
+	 */
+	for(tk = t->root; tk != nil; tk = tk->siblings) {
+		if((tk->flag & (Tkmapped|Tksuspended)) == Tkmapped) {
+			if(Dx(tk->dirty) > 0) {
+				e = tkmethod[tk->type]->draw(tk, ZP);
+				if(e != nil)
+					return e;
+				tk->dirty = bbnil;
+				dirty = 1;
+			}
+		}
+	}
+
 	if (dirty || t->dirty) {
 		flushimage(d, 1);
 		t->dirty = 0;

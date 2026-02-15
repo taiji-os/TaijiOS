@@ -114,6 +114,7 @@ window(ctxt: ref Draw->Context, title: string, buts: int): ref Window
 	titlebar->settitle(top, title);
 	sizetb(w);
 	w.wmctl("fixedorigin");
+
 	return w;
 }
 

@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <dirent.h>
 
+/* Forward declaration from devdraw.c */
+extern void drawwakeall(void);
+
 #define NTHEMECOLORS  26
 
 /* QID path values for theme files */
@@ -264,7 +267,11 @@ load_theme_by_name(char *name)
 	strncpy(themestate.current_theme, name, sizeof(themestate.current_theme)-1);
 	themestate.current_theme[sizeof(themestate.current_theme)-1] = 0;
 	themestate.version++;
+
 	Wakeup(&themestate.eventq);  /* Wake any blocked readers on Qevent */
+
+	/* Notify all draw clients across all processes to check for theme changes */
+	drawwakeall();
 
 	unlock(&themestate.l);
 

@@ -14,8 +14,6 @@ include "tk.m";
 	tk: Tk;
 include "tkclient.m";
 	tkclient: Tkclient;
-include "titlebar.m";
-	titlebar: Titlebar;
 
 Theme: module {
 	init:	fn(ctxt: ref Draw->Context, argv: list of string);
@@ -33,7 +31,6 @@ DEVTHEME := "#w/";
 display: ref Display;
 top: ref Tk->Toplevel;
 themes: list of string;
-lasttheme: string;
 
 tkcfg := array[] of {
 	"frame .f",
@@ -64,15 +61,10 @@ init(ctxt: ref Draw->Context, nil: list of string)
 	tkclient = load Tkclient Tkclient->PATH;
 	if(tkclient == nil)
 		badmodule(Tkclient->PATH);
-	titlebar = load Titlebar Titlebar->PATH;
-	if(titlebar == nil)
-		badmodule(Titlebar->PATH);
 
 	sys->pctl(Sys->NEWPGRP, nil);
 
 	tkclient->init();
-	if(titlebar != nil)
-		titlebar->init();
 	if(ctxt == nil)
 		ctxt = tkclient->makedrawcontext();
 	display = ctxt.display;
@@ -215,13 +207,18 @@ get_selected(): string
 
 apply_theme()
 {
+	sys->fprint(sys->fildes(2), "theme: apply_theme() ENTRY\n");
+
 	theme := get_selected();
 	if(theme == nil) {
 		cmd(top, ".title configure -text {No theme selected!}");
 		return;
 	}
 
+	sys->fprint(sys->fildes(2), "theme: selected theme='%s'\n", theme);
+
 	# Write to #w/theme (kernel device path)
+	sys->fprint(sys->fildes(2), "theme: opening #w/theme...\n");
 	fd := sys->open("#w/theme", Sys->OWRITE);
 	if(fd == nil) {
 		cmd(top, ".title configure -text {Cannot open #w/theme!}");
@@ -229,87 +226,32 @@ apply_theme()
 		return;
 	}
 
+	sys->fprint(sys->fildes(2), "theme: writing theme to device...\n");
 	if(sys->write(fd, array of byte theme, len theme) != len theme) {
 		cmd(top, ".title configure -text {Failed to write theme!}");
+		sys->fprint(sys->fildes(2), "theme: write failed: %r\n");
 		return;
 	}
 
-	# Update title text FIRST
+	sys->fprint(sys->fildes(2), "theme: closing device...\n");
+	# Device file closed automatically
+
+	sys->fprint(sys->fildes(2), "theme: force immediate refresh...\n");
+	# Force immediate refresh of current window's theme
+	# This ensures the theme switcher itself updates with the new colors
+	tk->refreshallenvs();
+
+	sys->fprint(sys->fildes(2), "theme: updating title text...\n");
+	# Update our title text
 	cmd(top, sys->sprint(".title configure -text {Theme: %s}", theme));
 
-	# THEN refresh all colors (this sets foreground on .title)
-	refresh_theme_colors();
+	sys->fprint(sys->fildes(2), "theme: apply_theme() DONE - returning to event loop\n");
 
-	# Force refresh of ALL applications globally
-	# This works even if callbacks failed to register
-	tk->cmd(top, "refreshallenvs");
-
-	# Refresh all window titlebars
-	if(titlebar != nil)
-		titlebar->refresh_all();
-
-	# Force immediate redraw of all widgets
-	cmd(top, "update");
-}
-
-refresh_theme_colors()
-{
-	# Reconfigure all frames and widgets with new background
-	bg := get_color(1);  # TkCbackgnd
-	fg := get_color(0);  # TkCforegnd
-
-	if(bg != nil) {
-		cmd(top, ". configure -background " + bg);
-		cmd(top, ".f configure -background " + bg);
-		cmd(top, ".listframe configure -background " + bg);
-		cmd(top, ".listframe.lst configure -background " + bg);
-		cmd(top, ".listframe.sb configure -background " + bg);
-		cmd(top, ".btns configure -background " + bg);
-	}
-	if(fg != nil)
-		cmd(top, ".title configure -foreground " + fg);
-	if(bg != nil)
-		cmd(top, ".title configure -background " + bg);
-
-	# Refresh buttons
-	refresh_buttons();
-}
-
-refresh_buttons()
-{
-	bg := get_color(1);  # TkCbackgnd
-	fg := get_color(0);  # TkCforegnd
-
-	# Configure EACH button individually
-	if(bg != nil) {
-		cmd(top, ".btns.apply configure -background " + bg);
-		cmd(top, ".btns.reload configure -background " + bg);
-		cmd(top, ".btns.close configure -background " + bg);
-	}
-	if(fg != nil) {
-		cmd(top, ".btns.apply configure -foreground " + fg);
-		cmd(top, ".btns.reload configure -foreground " + fg);
-		cmd(top, ".btns.close configure -foreground " + fg);
-	}
-}
-
-get_color(idx: int): string
-{
-	fd := sys->open(sys->sprint("#w/%d", idx), Sys->OREAD);
-	if(fd == nil)
-		return nil;
-
-	buf := array[128] of byte;
-	n := sys->read(fd, buf, len buf);
-
-	if(n <= 0)
-		return nil;
-
-	# Strip trailing whitespace (newline from device)
-	s := string buf[0:n];
-	while(len s > 0 && (s[len s-1] == '\n' || s[len s-1] == '\r' || s[len s-1] == ' '))
-		s = s[0:len s-1];
-	return s;
+	# DONE! Kernel handles everything else automatically:
+	# - Theme loaded into #w/0-25 color files
+	# - drawwakeall() notifies all processes
+	# - Each process's next event triggers tkrefreshallthemes()
+	# - All widgets update automatically
 }
 
 reload_themes()

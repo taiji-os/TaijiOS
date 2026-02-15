@@ -535,7 +535,8 @@ setcols(t: ref Tk->Toplevel)
 		else
 			fgcol = "#005DBBFF";	# DGreyblue
 	}
-	cmd(t, ".ft.t configure -foreground "+fgcol+" -selectforeground "+fgcol);
+	bgcol := "white";
+	cmd(t, ".ft.t configure -foreground "+fgcol+" -selectforeground "+fgcol+" -bg "+bgcol);
 	cmd(t, ".ft.t tag configure sel -foreground "+fgcol);
 }
 

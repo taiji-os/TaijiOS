@@ -1225,7 +1225,7 @@ drawwakeall(void)
 
 	for(i=0; i<sdraw.nclient; i++){
 		cl = sdraw.client[i];
-		if(cl && (cl->refreshme || cl->refresh))
+		if(cl)
 			Wakeup(&cl->refrend);
 	}
 }

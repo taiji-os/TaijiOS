@@ -552,7 +552,14 @@ tkrefreshtheme(TkEnv *env)
 	/* Parse version from "version N" */
 	char *p = strstr(buf, "version ");
 	if(p != nil) {
-		newversion = atoll(p + 8);
+		char *endp;
+		newversion = strtoull(p + 8, &endp, 10);
+		/* Verify parsing succeeded - check if we consumed any digits */
+		if(endp == p + 8 || (*endp != '\n' && *endp != '\0' && *endp != ' ')) {
+			/* Parse failed, don't update with invalid version */
+			unlock(&alltktopslock);
+			return 0;
+		}
 	}
 
 	if(newversion != env->themeversion) {

@@ -441,12 +441,13 @@ tkdrawcanv(Tk *tk, Point orig)
 			bufr.max.y = c->view.y + tk->act.height;
 		}
 		alpha = (tk->env->colors[TkCbackgnd] & 0xff) != 0xff;
-		if(c->image == nil || eqrect(bufr, c->image->r) == 0) {
+		if(c->image == nil || eqrect(bufr, c->image->r) == 0 || tk->env->themeversion != c->theme_version) {
 			if(c->image != nil && c->ialloc)
 				freeimage(c->image);
 			c->image = allocimage(d, bufr, alpha?RGBA32:d->image->chan, 0, tk->env->colors[TkCbackgnd]);
 			c->ialloc = 1;
 			c->update = bufr;
+			c->theme_version = tk->env->themeversion;
 			tkcvssetdirty(tk);		/* unnecessary? */
 		}
 	

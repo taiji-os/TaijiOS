@@ -234,7 +234,6 @@ tktext(TkTop *t, char* arg, char **ret)
 		if(e != nil)
 			goto err;
 
-		tkputenv(ti->env);
 		ti->env = tknewenv(t);
 		if(ti->env == nil)
 			goto err;

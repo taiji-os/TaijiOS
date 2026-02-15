@@ -7,6 +7,7 @@
 
 extern	void	tkfreetop(Heap*, int);
 void	Tk_refreshallenvs(void*);
+extern void tkrefreshallthemes(void);
 
 #include "tkmod.h"
 #include "pool.h"
@@ -358,6 +359,9 @@ Tk_pointer(void *a)
 	if(t == H || D2H(t)->t != fakeTkTop)
 		return;
 
+	/* Check for theme changes and refresh if needed */
+	tkrefreshallthemes();
+
 	c = t->ctxt;
 
 	/* ignore no-button-motion for emulated stylus input */
@@ -507,6 +511,10 @@ Tk_keyboard(void *a)
 	tl = (Tk_Toplevel*)t;
 	if(t == H || D2H(t)->t != fakeTkTop)
 		return;
+
+	/* Check for theme changes and refresh if needed */
+	tkrefreshallthemes();
+
 	c = t->ctxt;
 	if (c == nil)
 		return;

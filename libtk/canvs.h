@@ -117,6 +117,7 @@ struct TkCanvas
 	Image*		image;		/* Drawing space */
 	int			ialloc;		/* image was allocated by us? */
 	Image*		mask;		/* mask space (for stippling) */
+	int			theme_version;	/* track theme changes for cache invalidation */
 	TkName*		thash[TkChash];	/* Tag hash */
 	int		actions;
 	int		actlim;
